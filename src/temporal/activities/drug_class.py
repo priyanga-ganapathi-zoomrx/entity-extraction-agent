@@ -128,14 +128,14 @@ def step2_fetch_search_results(
         5
     """
     from src.agents.drug_class.step2_search import fetch_search_results
-    from src.agents.core.storage import LocalStorageClient
+    from src.agents.core.storage import get_storage_client
     
     activity.logger.info(
         f"Step 2 - Fetching search results for drug '{drug}'"
     )
     
-    # Create storage client for caching
-    storage = LocalStorageClient(base_dir=storage_base_path) if storage_base_path else LocalStorageClient()
+    # Create storage client for caching (auto-detects GCS vs local)
+    storage = get_storage_client(storage_base_path) if storage_base_path else get_storage_client("output")
     
     # Call existing function - returns tuple
     drug_class_results, firm_search_results = fetch_search_results(drug, firms, storage)

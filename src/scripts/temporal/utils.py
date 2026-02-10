@@ -205,16 +205,14 @@ def _list_abstract_ids_local(data_dir: str) -> list[str]:
 
 def _list_abstract_ids_gcs(data_dir: str) -> list[str]:
     """List abstract IDs from GCS."""
-    from google.cloud import storage as gcs_storage
-
     bucket_name, prefix = parse_gcs_path(data_dir)
 
     # Build the prefix for listing: {prefix}/abstracts/
     abstracts_prefix = f"{prefix}/abstracts/" if prefix else "abstracts/"
 
-    # Use delimiter to get "directories" only
-    storage_client = gcs_storage.Client()
-    bucket = storage_client.bucket(bucket_name)
+    # Reuse GCSStorageClient to get a properly authenticated client
+    gcs_client = GCSStorageClient(bucket_name, prefix)
+    bucket = gcs_client.bucket
 
     # List blobs with delimiter to get directory-like prefixes
     iterator = bucket.list_blobs(prefix=abstracts_prefix, delimiter="/")

@@ -292,18 +292,35 @@ async def start_batch_extraction(
 # BATCH SUMMARY AND RETRY CSV WRITING
 # =============================================================================
 
-def _write_retry_csv(filepath: Path, results: list[BatchResult]) -> None:
-    """Write a CSV of abstract IDs for retry.
+def _write_retry_csv(filepath: str, results: list[BatchResult]) -> None:
+    """Write a CSV of abstract IDs for retry (supports local and GCS paths).
     
     Output has the same columns as the input CSV so it can be
     passed directly as --input.
     """
-    filepath.parent.mkdir(parents=True, exist_ok=True)
-    with open(filepath, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(["abstract_id", "abstract_title"])
-        for r in results:
-            writer.writerow([r.abstract_id, r.abstract_title])
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["abstract_id", "abstract_title"])
+    for r in results:
+        writer.writerow([r.abstract_id, r.abstract_title])
+    csv_content = output.getvalue()
+
+    if filepath.startswith("gs://"):
+        from src.agents.core.storage import parse_gcs_path, GCSStorageClient
+        bucket, full_prefix = parse_gcs_path(filepath)
+        if "/" in full_prefix:
+            base_prefix = "/".join(full_prefix.split("/")[:-1])
+            csv_filename = full_prefix.split("/")[-1]
+        else:
+            base_prefix = ""
+            csv_filename = full_prefix
+        storage = GCSStorageClient(bucket, base_prefix)
+        storage.upload_text(csv_filename, csv_content)
+    else:
+        local_path = Path(filepath)
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(local_path, "w", newline="", encoding="utf-8") as f:
+            f.write(csv_content)
 
 
 def _print_batch_summary(
@@ -325,20 +342,23 @@ def _print_batch_summary(
     print(f"  Partial:  {len(partial_results)}")
     print(f"  Failed:   {len(failed_results)}")
 
-    # Determine output directory for retry CSVs
-    if storage_path:
-        output_dir = Path(storage_path)
+    # Determine base path for retry CSVs
+    base_path = storage_path if storage_path else "data/output"
+
+    # Build retry CSV paths (works for both local and GCS)
+    if base_path.startswith("gs://"):
+        failed_path = f"{base_path.rstrip('/')}/failed_{timestamp}.csv"
+        partial_path = f"{base_path.rstrip('/')}/partial_{timestamp}.csv"
     else:
-        output_dir = Path("data/output")
+        failed_path = str(Path(base_path) / f"failed_{timestamp}.csv")
+        partial_path = str(Path(base_path) / f"partial_{timestamp}.csv")
 
     # Write retry CSVs
     if failed_results:
-        failed_path = output_dir / f"failed_{timestamp}.csv"
         _write_retry_csv(failed_path, failed_results)
         print(f"\n  Retry (failed):  {failed_path} ({len(failed_results)} items)")
 
     if partial_results:
-        partial_path = output_dir / f"partial_{timestamp}.csv"
         _write_retry_csv(partial_path, partial_results)
         print(f"  Retry (partial): {partial_path} ({len(partial_results)} items)")
 
