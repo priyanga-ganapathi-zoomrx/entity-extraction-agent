@@ -1,4 +1,4 @@
-# Indication Extraction Agent
+# Entity Extraction Agent
 
 Batch processing system for extracting **indications**, **drugs**, and **drug classes** from medical conference abstracts using LLMs.
 
