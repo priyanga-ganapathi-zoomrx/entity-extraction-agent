@@ -1,0 +1,41 @@
+# Vault Path: app-configuration/ferma-congress/dev/<APPLICATION_NAME>/.env/configs
+
+ENVIRONMENT=dev
+IDLE_SHUTDOWN_MINUTES=5
+TEMPORAL_HOST=<TEMPORAL_SERVER_ADDRESS>
+TEMPORAL_NAMESPACE=default
+
+
+LLM_BASE_URL=https://dev-cg-litellm.zoomrx.ai
+
+LANGFUSE_HOST=https://langfuse.zoomrx.ai
+
+
+
+INDICATION_LLM_MODEL=gemini/gemini-2.5-pro
+INDICATION_VALIDATION_LLM_MODEL=gemini/gemini-2.5-pro
+
+
+
+DRUG_EXTRACTION_MODEL=gemini/gemini-2.5-pro
+DRUG_VALIDATION_MODEL=gemini/gemini-3-flash-preview
+
+
+
+DRUG_CLASS_REGIMEN_MODEL=gemini/gemini-3-pro-preview
+DRUG_CLASS_EXTRACTION_MODEL=gemini/gemini-3-pro-preview
+DRUG_CLASS_GROUNDED_MODEL=gemini/gemini-3-flash-preview
+DRUG_CLASS_SELECTION_MODEL=gemini/gemini-3-flash-preview
+DRUG_CLASS_EXPLICIT_MODEL=gemini/gemini-3-flash-preview
+DRUG_CLASS_CONSOLIDATION_MODEL=gemini/gemini-3-flash-preview
+
+
+
+GCS_PROJECT_ID=ferma-congress-dev
+GCS_BUCKET_NAME="entity-extraction-agent-data-dev"
+
+
+# =============================================================================
+# PLACEHOLDERS TO FILL:
+# - <TEMPORAL_SERVER_ADDRESS>: e.g., temporal-frontend.temporal:7233
+# =============================================================================

@@ -36,6 +36,9 @@ env/
 *.swo
 *~
 
+# GCP Service Account Credentials
+ferma-congress-*.json
+
 # OS
 .DS_Store
 Thumbs.db
