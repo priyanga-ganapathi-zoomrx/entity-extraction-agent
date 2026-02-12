@@ -60,6 +60,28 @@ class GCSSettings(BaseSettings):
     GOOGLE_APPLICATION_CREDENTIALS: str = Field(default="", description="Path to service account JSON file")
 
 
+class EMSSettings(BaseSettings):
+    """EMS (Event Management System) logging configuration.
+
+    Publishes structured ECS events to Google Cloud Pub/Sub.
+    """
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    EMS_ENABLED: bool = Field(default=False, description="Enable EMS event publishing to Pub/Sub")
+    EMS_PUBSUB_TOPIC: str = Field(default="", description="Pub/Sub topic name (not full path)")
+
+
+class SentrySettings(BaseSettings):
+    """Sentry error monitoring configuration."""
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    SENTRY_ENABLED: bool = Field(default=False, description="Enable Sentry error capture")
+    SENTRY_DSN: str = Field(default="", description="Sentry DSN for error reporting")
+    SENTRY_ENVIRONMENT: str = Field(default="dev", description="Sentry environment tag")
+
+
 class AppSettings(BaseSettings):
     """Application configuration settings."""
 
@@ -70,6 +92,8 @@ class AppSettings(BaseSettings):
     llm: LLMSettings = LLMSettings()
     tavily: TavilySettings = TavilySettings()
     gcs: GCSSettings = GCSSettings()
+    ems: EMSSettings = EMSSettings()
+    sentry: SentrySettings = SentrySettings()
 
 
 # Global settings instance

@@ -11,6 +11,7 @@ They:
 - Accept IndicationInput dataclass as input
 - Instantiate and invoke the agent classes
 - Parse and serialize outputs for Temporal
+- Publish structured EMS events (success/failure) to Pub/Sub
 
 Best Practices Applied:
 - Activities are synchronous because underlying LangGraph agents use synchronous execution
@@ -21,9 +22,12 @@ Best Practices Applied:
 
 import json
 import re
+import time
 
 from temporalio import activity
 
+from src.agents.core.ems_logger import get_logger
+from src.agents.indication.config import config as ind_config
 from src.agents.indication.schemas import (
     IndicationInput,
     ExtractionLLMResponse,
@@ -178,32 +182,79 @@ def extract_indication(input_data: IndicationInput) -> dict:
         f"Extracting indication from abstract {input_data.abstract_id}"
     )
     
-    # Create tracker and agent instance
+    ems_logger = get_logger("indication_extraction")
+    info = activity.info()
     tracker = TokenUsageCallbackHandler()
-    agent = IndicationAgent()
+    start = time.time()
     
-    # Invoke agent with token tracking callback
-    raw_result = agent.invoke(
-        abstract_title=input_data.abstract_title,
-        session_title=input_data.session_title,
-        abstract_id=input_data.abstract_id,
-        callbacks=[tracker],
-    )
-    
-    # Parse result from messages
-    messages = raw_result.get("messages", [])
-    result = _extract_result_from_messages(messages, ExtractionLLMResponse)
-    
-    activity.logger.info(
-        f"Extracted indication: '{result.get('generated_indication', '')}' "
-        f"from source: {result.get('selected_source', 'unknown')}"
-    )
-    
-    # Embed token metadata for workflow
-    result["_token_usage"] = tracker.usage.to_dict()
-    result["_llm_calls"] = tracker.llm_calls
-    
-    return result
+    try:
+        # Create agent and invoke
+        agent = IndicationAgent()
+        raw_result = agent.invoke(
+            abstract_title=input_data.abstract_title,
+            session_title=input_data.session_title,
+            abstract_id=input_data.abstract_id,
+            callbacks=[tracker],
+        )
+        
+        # Parse result from messages (can raise IndicationExtractionError)
+        messages = raw_result.get("messages", [])
+        result = _extract_result_from_messages(messages, ExtractionLLMResponse)
+        duration_ms = int((time.time() - start) * 1000)
+        
+        activity.logger.info(
+            f"Extracted indication: '{result.get('generated_indication', '')}' "
+            f"from source: {result.get('selected_source', 'unknown')}"
+        )
+        
+        ems_logger.info(
+            "step_completed",
+            abstract_id=input_data.abstract_id,
+            model=ind_config.LLM_MODEL,
+            input_data={
+                "abstract_id": input_data.abstract_id,
+                "abstract_title": input_data.abstract_title,
+                "session_title": input_data.session_title,
+            },
+            output={
+                "generated_indication": result.get("generated_indication"),
+                "selected_source": result.get("selected_source"),
+            },
+            outcome="success",
+            llm_calls=tracker.llm_calls,
+            input_tokens=tracker.usage.input_tokens,
+            output_tokens=tracker.usage.output_tokens,
+            total_tokens=tracker.usage.total_tokens,
+            duration_ms=duration_ms,
+            attempt=info.attempt,
+            workflow_run_id=info.workflow_run_id,
+        )
+        
+        # Embed token metadata for workflow
+        result["_token_usage"] = tracker.usage.to_dict()
+        result["_llm_calls"] = tracker.llm_calls
+        
+        return result
+        
+    except Exception as e:
+        duration_ms = int((time.time() - start) * 1000)
+        ems_logger.error(
+            "step_failed",
+            abstract_id=input_data.abstract_id,
+            model=ind_config.LLM_MODEL,
+            input_data={
+                "abstract_id": input_data.abstract_id,
+                "abstract_title": input_data.abstract_title,
+                "session_title": input_data.session_title,
+            },
+            error=str(e),
+            outcome="failure",
+            exc_info=True,
+            duration_ms=duration_ms,
+            attempt=info.attempt,
+            workflow_run_id=info.workflow_run_id,
+        )
+        raise
 
 
 # =============================================================================
@@ -267,30 +318,76 @@ def validate_indication(
         f"Validating indication extraction for abstract {input_data.abstract_id}"
     )
     
-    # Create tracker and agent instance
+    ems_logger = get_logger("indication_validation")
+    info = activity.info()
     tracker = TokenUsageCallbackHandler()
-    agent = IndicationValidationAgent()
+    start = time.time()
     
-    # Invoke agent with token tracking callback
-    raw_result = agent.invoke(
-        session_title=input_data.session_title,
-        abstract_title=input_data.abstract_title,
-        extraction_result=extraction_result,
-        abstract_id=input_data.abstract_id,
-        callbacks=[tracker],
-    )
-    
-    # Parse result from messages
-    messages = raw_result.get("messages", [])
-    result = _extract_result_from_messages(messages, ValidationLLMResponse)
-    
-    activity.logger.info(
-        f"Validation result for abstract {input_data.abstract_id}: "
-        f"{result.get('validation_status', 'UNKNOWN')}"
-    )
-    
-    # Embed token metadata for workflow
-    result["_token_usage"] = tracker.usage.to_dict()
-    result["_llm_calls"] = tracker.llm_calls
-    
-    return result
+    try:
+        # Create agent and invoke
+        agent = IndicationValidationAgent()
+        raw_result = agent.invoke(
+            session_title=input_data.session_title,
+            abstract_title=input_data.abstract_title,
+            extraction_result=extraction_result,
+            abstract_id=input_data.abstract_id,
+            callbacks=[tracker],
+        )
+        
+        # Parse result from messages (can raise IndicationExtractionError)
+        messages = raw_result.get("messages", [])
+        result = _extract_result_from_messages(messages, ValidationLLMResponse)
+        duration_ms = int((time.time() - start) * 1000)
+        
+        activity.logger.info(
+            f"Validation result for abstract {input_data.abstract_id}: "
+            f"{result.get('validation_status', 'UNKNOWN')}"
+        )
+        
+        ems_logger.info(
+            "step_completed",
+            abstract_id=input_data.abstract_id,
+            model=ind_config.VALIDATION_LLM_MODEL,
+            input_data={
+                "abstract_id": input_data.abstract_id,
+                "abstract_title": input_data.abstract_title,
+                "generated_indication": extraction_result.get("generated_indication"),
+            },
+            output={
+                "validation_status": result.get("validation_status"),
+            },
+            outcome="success",
+            llm_calls=tracker.llm_calls,
+            input_tokens=tracker.usage.input_tokens,
+            output_tokens=tracker.usage.output_tokens,
+            total_tokens=tracker.usage.total_tokens,
+            duration_ms=duration_ms,
+            attempt=info.attempt,
+            workflow_run_id=info.workflow_run_id,
+        )
+        
+        # Embed token metadata for workflow
+        result["_token_usage"] = tracker.usage.to_dict()
+        result["_llm_calls"] = tracker.llm_calls
+        
+        return result
+        
+    except Exception as e:
+        duration_ms = int((time.time() - start) * 1000)
+        ems_logger.error(
+            "step_failed",
+            abstract_id=input_data.abstract_id,
+            model=ind_config.VALIDATION_LLM_MODEL,
+            input_data={
+                "abstract_id": input_data.abstract_id,
+                "abstract_title": input_data.abstract_title,
+                "generated_indication": extraction_result.get("generated_indication"),
+            },
+            error=str(e),
+            outcome="failure",
+            exc_info=True,
+            duration_ms=duration_ms,
+            attempt=info.attempt,
+            workflow_run_id=info.workflow_run_id,
+        )
+        raise

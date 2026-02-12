@@ -13,6 +13,7 @@ They:
 - Call the existing agent functions
 - Serialize outputs to dicts for Temporal serialization
 - Let Temporal handle retries (configured in workflow execution)
+- Publish structured EMS events (success/failure) to Pub/Sub
 
 Error Handling:
 - Agent functions use LangChain's with_structured_output() for reliable JSON parsing
@@ -28,8 +29,12 @@ Best Practices Applied:
 - No application-level retry (tenacity removed) - Temporal handles all retries
 """
 
+import time
+
 from temporalio import activity
 
+from src.agents.core.ems_logger import get_logger
+from src.agents.drug_class.config import config as dc_config
 from src.agents.drug_class.schemas import (
     RegimenInput,
     DrugClassExtractionInput,
@@ -83,17 +88,59 @@ def step1_regimen(input_data: RegimenInput) -> dict:
         f"in abstract {input_data.abstract_id}"
     )
     
-    # Create tracker and call agent with it
+    ems_logger = get_logger("drug_class_step1_regimen")
+    info = activity.info()
     tracker = TokenUsageCallbackHandler()
-    result = identify_regimen(input_data, callbacks=[tracker])
+    start = time.time()
     
-    # Step 1 returns list[str] directly - wrap with token metadata
-    # Workflow will handle extracting _token_usage before use
-    return {
-        "_result": result,
-        "_token_usage": tracker.usage.to_dict(),
-        "_llm_calls": tracker.llm_calls,
-    }
+    try:
+        result = identify_regimen(input_data, callbacks=[tracker])
+        duration_ms = int((time.time() - start) * 1000)
+        
+        ems_logger.info(
+            "step_completed",
+            abstract_id=input_data.abstract_id,
+            model=dc_config.REGIMEN_MODEL,
+            input_data={
+                "abstract_id": input_data.abstract_id,
+                "drug": input_data.drug,
+            },
+            output={"components": result},
+            outcome="success",
+            llm_calls=tracker.llm_calls,
+            input_tokens=tracker.usage.input_tokens,
+            output_tokens=tracker.usage.output_tokens,
+            total_tokens=tracker.usage.total_tokens,
+            duration_ms=duration_ms,
+            attempt=info.attempt,
+            workflow_run_id=info.workflow_run_id,
+        )
+        
+        # Step 1 returns list[str] directly - wrap with token metadata
+        return {
+            "_result": result,
+            "_token_usage": tracker.usage.to_dict(),
+            "_llm_calls": tracker.llm_calls,
+        }
+        
+    except Exception as e:
+        duration_ms = int((time.time() - start) * 1000)
+        ems_logger.error(
+            "step_failed",
+            abstract_id=input_data.abstract_id,
+            model=dc_config.REGIMEN_MODEL,
+            input_data={
+                "abstract_id": input_data.abstract_id,
+                "drug": input_data.drug,
+            },
+            error=str(e),
+            outcome="failure",
+            exc_info=True,
+            duration_ms=duration_ms,
+            attempt=info.attempt,
+            workflow_run_id=info.workflow_run_id,
+        )
+        raise
 
 
 # =============================================================================
@@ -134,16 +181,53 @@ def step2_fetch_search_results(
         f"Step 2 - Fetching search results for drug '{drug}'"
     )
     
-    # Create storage client for caching (auto-detects GCS vs local)
-    storage = get_storage_client(storage_base_path) if storage_base_path else get_storage_client("output")
+    ems_logger = get_logger("drug_class_step2_search")
+    info = activity.info()
+    # Derive abstract_id from workflow_id (format: "entity-extraction-{abstract_id}")
+    abstract_id = info.workflow_id.removeprefix("entity-extraction-")
+    start = time.time()
     
-    # Call existing function - returns tuple
-    drug_class_results, firm_search_results = fetch_search_results(drug, firms, storage)
-    
-    return {
-        "drug_class_results": drug_class_results,
-        "firm_search_results": firm_search_results,
-    }
+    try:
+        # Create storage client for caching (auto-detects GCS vs local)
+        storage = get_storage_client(storage_base_path) if storage_base_path else get_storage_client("output")
+        
+        # Call existing function - returns tuple
+        drug_class_results, firm_search_results = fetch_search_results(drug, firms, storage)
+        duration_ms = int((time.time() - start) * 1000)
+        
+        ems_logger.info(
+            "step_completed",
+            abstract_id=abstract_id,
+            input_data={"drug": drug, "num_firms": len(firms)},
+            output={
+                "num_drug_class_results": len(drug_class_results),
+                "num_firm_results": len(firm_search_results),
+            },
+            outcome="success",
+            duration_ms=duration_ms,
+            attempt=info.attempt,
+            workflow_run_id=info.workflow_run_id,
+        )
+        
+        return {
+            "drug_class_results": drug_class_results,
+            "firm_search_results": firm_search_results,
+        }
+        
+    except Exception as e:
+        duration_ms = int((time.time() - start) * 1000)
+        ems_logger.error(
+            "step_failed",
+            abstract_id=abstract_id,
+            input_data={"drug": drug, "num_firms": len(firms)},
+            error=str(e),
+            outcome="failure",
+            exc_info=True,
+            duration_ms=duration_ms,
+            attempt=info.attempt,
+            workflow_run_id=info.workflow_run_id,
+        )
+        raise
 
 
 @activity.defn(name="step2_extract_with_tavily")
@@ -186,14 +270,65 @@ def step2_extract_with_tavily(input_data: DrugClassExtractionInput) -> dict:
         f"in abstract {input_data.abstract_id}"
     )
     
+    ems_logger = get_logger("drug_class_step2_tavily")
+    info = activity.info()
     tracker = TokenUsageCallbackHandler()
-    result = extract_with_tavily(input_data, callbacks=[tracker])
+    start = time.time()
     
-    return {
-        **result.model_dump(),
-        "_token_usage": tracker.usage.to_dict(),
-        "_llm_calls": tracker.llm_calls,
-    }
+    try:
+        result = extract_with_tavily(input_data, callbacks=[tracker])
+        duration_ms = int((time.time() - start) * 1000)
+        result_dict = result.model_dump()
+        
+        ems_logger.info(
+            "step_completed",
+            abstract_id=input_data.abstract_id,
+            model=dc_config.EXTRACTION_MODEL,
+            input_data={
+                "abstract_id": input_data.abstract_id,
+                "drug": input_data.drug,
+                "num_search_results": len(input_data.drug_class_results or [])
+                + len(input_data.firm_search_results or []),
+            },
+            output={
+                "drug_classes": result_dict.get("drug_classes"),
+                "confidence_score": result_dict.get("confidence_score"),
+                "extraction_method": result_dict.get("extraction_method"),
+            },
+            outcome="success",
+            llm_calls=tracker.llm_calls,
+            input_tokens=tracker.usage.input_tokens,
+            output_tokens=tracker.usage.output_tokens,
+            total_tokens=tracker.usage.total_tokens,
+            duration_ms=duration_ms,
+            attempt=info.attempt,
+            workflow_run_id=info.workflow_run_id,
+        )
+        
+        return {
+            **result_dict,
+            "_token_usage": tracker.usage.to_dict(),
+            "_llm_calls": tracker.llm_calls,
+        }
+        
+    except Exception as e:
+        duration_ms = int((time.time() - start) * 1000)
+        ems_logger.error(
+            "step_failed",
+            abstract_id=input_data.abstract_id,
+            model=dc_config.EXTRACTION_MODEL,
+            input_data={
+                "abstract_id": input_data.abstract_id,
+                "drug": input_data.drug,
+            },
+            error=str(e),
+            outcome="failure",
+            exc_info=True,
+            duration_ms=duration_ms,
+            attempt=info.attempt,
+            workflow_run_id=info.workflow_run_id,
+        )
+        raise
 
 
 @activity.defn(name="step2_extract_with_grounded")
@@ -225,14 +360,62 @@ def step2_extract_with_grounded(input_data: DrugClassExtractionInput) -> dict:
         f"in abstract {input_data.abstract_id}"
     )
     
+    ems_logger = get_logger("drug_class_step2_grounded")
+    info = activity.info()
     tracker = TokenUsageCallbackHandler()
-    result = extract_with_grounded(input_data, callbacks=[tracker])
+    start = time.time()
     
-    return {
-        **result.model_dump(),
-        "_token_usage": tracker.usage.to_dict(),
-        "_llm_calls": tracker.llm_calls,
-    }
+    try:
+        result = extract_with_grounded(input_data, callbacks=[tracker])
+        duration_ms = int((time.time() - start) * 1000)
+        result_dict = result.model_dump()
+        
+        ems_logger.info(
+            "step_completed",
+            abstract_id=input_data.abstract_id,
+            model=dc_config.GROUNDED_MODEL,
+            input_data={
+                "abstract_id": input_data.abstract_id,
+                "drug": input_data.drug,
+            },
+            output={
+                "drug_classes": result_dict.get("drug_classes"),
+                "extraction_method": result_dict.get("extraction_method"),
+            },
+            outcome="success",
+            llm_calls=tracker.llm_calls,
+            input_tokens=tracker.usage.input_tokens,
+            output_tokens=tracker.usage.output_tokens,
+            total_tokens=tracker.usage.total_tokens,
+            duration_ms=duration_ms,
+            attempt=info.attempt,
+            workflow_run_id=info.workflow_run_id,
+        )
+        
+        return {
+            **result_dict,
+            "_token_usage": tracker.usage.to_dict(),
+            "_llm_calls": tracker.llm_calls,
+        }
+        
+    except Exception as e:
+        duration_ms = int((time.time() - start) * 1000)
+        ems_logger.error(
+            "step_failed",
+            abstract_id=input_data.abstract_id,
+            model=dc_config.GROUNDED_MODEL,
+            input_data={
+                "abstract_id": input_data.abstract_id,
+                "drug": input_data.drug,
+            },
+            error=str(e),
+            outcome="failure",
+            exc_info=True,
+            duration_ms=duration_ms,
+            attempt=info.attempt,
+            workflow_run_id=info.workflow_run_id,
+        )
+        raise
 
 
 # =============================================================================
@@ -274,14 +457,60 @@ def step3_selection(input_data: SelectionInput) -> dict:
         f"in abstract {input_data.abstract_id}"
     )
     
+    ems_logger = get_logger("drug_class_step3_selection")
+    info = activity.info()
     tracker = TokenUsageCallbackHandler()
-    result = select_drug_class(input_data, callbacks=[tracker])
+    start = time.time()
     
-    return {
-        **result.model_dump(),
-        "_token_usage": tracker.usage.to_dict(),
-        "_llm_calls": tracker.llm_calls,
-    }
+    try:
+        result = select_drug_class(input_data, callbacks=[tracker])
+        duration_ms = int((time.time() - start) * 1000)
+        result_dict = result.model_dump()
+        
+        ems_logger.info(
+            "step_completed",
+            abstract_id=input_data.abstract_id,
+            model=dc_config.SELECTION_MODEL,
+            input_data={
+                "abstract_id": input_data.abstract_id,
+                "drug_name": input_data.drug_name,
+                "num_extraction_details": len(input_data.extraction_details or []),
+            },
+            output={"selected_drug_classes": result_dict.get("selected_drug_classes")},
+            outcome="skipped" if tracker.llm_calls == 0 else "success",
+            llm_calls=tracker.llm_calls,
+            input_tokens=tracker.usage.input_tokens,
+            output_tokens=tracker.usage.output_tokens,
+            total_tokens=tracker.usage.total_tokens,
+            duration_ms=duration_ms,
+            attempt=info.attempt,
+            workflow_run_id=info.workflow_run_id,
+        )
+        
+        return {
+            **result_dict,
+            "_token_usage": tracker.usage.to_dict(),
+            "_llm_calls": tracker.llm_calls,
+        }
+        
+    except Exception as e:
+        duration_ms = int((time.time() - start) * 1000)
+        ems_logger.error(
+            "step_failed",
+            abstract_id=input_data.abstract_id,
+            model=dc_config.SELECTION_MODEL,
+            input_data={
+                "abstract_id": input_data.abstract_id,
+                "drug_name": input_data.drug_name,
+            },
+            error=str(e),
+            outcome="failure",
+            exc_info=True,
+            duration_ms=duration_ms,
+            attempt=info.attempt,
+            workflow_run_id=info.workflow_run_id,
+        )
+        raise
 
 
 # =============================================================================
@@ -320,14 +549,59 @@ def step4_explicit(input_data: ExplicitExtractionInput) -> dict:
         f"Step 4 - Explicit extraction for abstract {input_data.abstract_id}"
     )
     
+    ems_logger = get_logger("drug_class_step4_explicit")
+    info = activity.info()
     tracker = TokenUsageCallbackHandler()
-    result = extract_explicit_classes(input_data, callbacks=[tracker])
+    start = time.time()
     
-    return {
-        **result.model_dump(),
-        "_token_usage": tracker.usage.to_dict(),
-        "_llm_calls": tracker.llm_calls,
-    }
+    try:
+        result = extract_explicit_classes(input_data, callbacks=[tracker])
+        duration_ms = int((time.time() - start) * 1000)
+        result_dict = result.model_dump()
+        
+        ems_logger.info(
+            "step_completed",
+            abstract_id=input_data.abstract_id,
+            model=dc_config.EXPLICIT_MODEL,
+            input_data={
+                "abstract_id": input_data.abstract_id,
+                "abstract_title": input_data.abstract_title,
+            },
+            output={"explicit_drug_classes": result_dict.get("explicit_drug_classes")},
+            outcome="skipped" if tracker.llm_calls == 0 else "success",
+            llm_calls=tracker.llm_calls,
+            input_tokens=tracker.usage.input_tokens,
+            output_tokens=tracker.usage.output_tokens,
+            total_tokens=tracker.usage.total_tokens,
+            duration_ms=duration_ms,
+            attempt=info.attempt,
+            workflow_run_id=info.workflow_run_id,
+        )
+        
+        return {
+            **result_dict,
+            "_token_usage": tracker.usage.to_dict(),
+            "_llm_calls": tracker.llm_calls,
+        }
+        
+    except Exception as e:
+        duration_ms = int((time.time() - start) * 1000)
+        ems_logger.error(
+            "step_failed",
+            abstract_id=input_data.abstract_id,
+            model=dc_config.EXPLICIT_MODEL,
+            input_data={
+                "abstract_id": input_data.abstract_id,
+                "abstract_title": input_data.abstract_title,
+            },
+            error=str(e),
+            outcome="failure",
+            exc_info=True,
+            duration_ms=duration_ms,
+            attempt=info.attempt,
+            workflow_run_id=info.workflow_run_id,
+        )
+        raise
 
 
 # =============================================================================
@@ -369,14 +643,64 @@ def step5_consolidation(input_data: ConsolidationInput) -> dict:
         f"Step 5 - Consolidation for abstract {input_data.abstract_id}"
     )
     
+    ems_logger = get_logger("drug_class_step5_consolidation")
+    info = activity.info()
     tracker = TokenUsageCallbackHandler()
-    result = consolidate_drug_classes(input_data, callbacks=[tracker])
+    start = time.time()
     
-    return {
-        **result.model_dump(),
-        "_token_usage": tracker.usage.to_dict(),
-        "_llm_calls": tracker.llm_calls,
-    }
+    try:
+        result = consolidate_drug_classes(input_data, callbacks=[tracker])
+        duration_ms = int((time.time() - start) * 1000)
+        result_dict = result.model_dump()
+        
+        ems_logger.info(
+            "step_completed",
+            abstract_id=input_data.abstract_id,
+            model=dc_config.CONSOLIDATION_MODEL,
+            input_data={
+                "abstract_id": input_data.abstract_id,
+                "num_explicit_classes": len(input_data.explicit_drug_classes or []),
+                "num_drug_selections": len(input_data.drug_selections or []),
+            },
+            output={
+                "refined_explicit_classes": result_dict.get("refined_explicit_classes"),
+                "removed_classes": result_dict.get("removed_classes"),
+            },
+            outcome="skipped" if tracker.llm_calls == 0 else "success",
+            llm_calls=tracker.llm_calls,
+            input_tokens=tracker.usage.input_tokens,
+            output_tokens=tracker.usage.output_tokens,
+            total_tokens=tracker.usage.total_tokens,
+            duration_ms=duration_ms,
+            attempt=info.attempt,
+            workflow_run_id=info.workflow_run_id,
+        )
+        
+        return {
+            **result_dict,
+            "_token_usage": tracker.usage.to_dict(),
+            "_llm_calls": tracker.llm_calls,
+        }
+        
+    except Exception as e:
+        duration_ms = int((time.time() - start) * 1000)
+        ems_logger.error(
+            "step_failed",
+            abstract_id=input_data.abstract_id,
+            model=dc_config.CONSOLIDATION_MODEL,
+            input_data={
+                "abstract_id": input_data.abstract_id,
+                "num_explicit_classes": len(input_data.explicit_drug_classes or []),
+                "num_drug_selections": len(input_data.drug_selections or []),
+            },
+            error=str(e),
+            outcome="failure",
+            exc_info=True,
+            duration_ms=duration_ms,
+            attempt=info.attempt,
+            workflow_run_id=info.workflow_run_id,
+        )
+        raise
 
 
 # =============================================================================
@@ -421,11 +745,62 @@ def validate_drug_class_activity(input_data: DrugClassValidationInput) -> dict:
         f"in abstract {input_data.abstract_id}"
     )
     
+    ems_logger = get_logger("drug_class_validation")
+    info = activity.info()
     tracker = TokenUsageCallbackHandler()
-    result = validate_drug_class(input_data, callbacks=[tracker])
+    start = time.time()
     
-    return {
-        **result.model_dump(),
-        "_token_usage": tracker.usage.to_dict(),
-        "_llm_calls": tracker.llm_calls,
-    }
+    try:
+        result = validate_drug_class(input_data, callbacks=[tracker])
+        duration_ms = int((time.time() - start) * 1000)
+        result_dict = result.model_dump()
+        
+        ems_logger.info(
+            "step_completed",
+            abstract_id=input_data.abstract_id,
+            model=dc_config.VALIDATION_MODEL,
+            input_data={
+                "abstract_id": input_data.abstract_id,
+                "drug_name": input_data.drug_name,
+                "drug_classes": input_data.extraction_result.get("drug_classes"),
+            },
+            output={
+                "validation_status": result_dict.get("validation_status"),
+                "validation_confidence": result_dict.get("validation_confidence"),
+                "issues_found_count": len(result_dict.get("issues_found", [])),
+            },
+            outcome="success",
+            llm_calls=tracker.llm_calls,
+            input_tokens=tracker.usage.input_tokens,
+            output_tokens=tracker.usage.output_tokens,
+            total_tokens=tracker.usage.total_tokens,
+            duration_ms=duration_ms,
+            attempt=info.attempt,
+            workflow_run_id=info.workflow_run_id,
+        )
+        
+        return {
+            **result_dict,
+            "_token_usage": tracker.usage.to_dict(),
+            "_llm_calls": tracker.llm_calls,
+        }
+        
+    except Exception as e:
+        duration_ms = int((time.time() - start) * 1000)
+        ems_logger.error(
+            "step_failed",
+            abstract_id=input_data.abstract_id,
+            model=dc_config.VALIDATION_MODEL,
+            input_data={
+                "abstract_id": input_data.abstract_id,
+                "drug_name": input_data.drug_name,
+                "drug_classes": input_data.extraction_result.get("drug_classes"),
+            },
+            error=str(e),
+            outcome="failure",
+            exc_info=True,
+            duration_ms=duration_ms,
+            attempt=info.attempt,
+            workflow_run_id=info.workflow_run_id,
+        )
+        raise

@@ -28,6 +28,7 @@ from src.agents.drug_class.schemas import (
     ValidationInput,
     ValidationLLMResponse,
     ValidationOutput,
+    DrugClassExtractionError,
 )
 
 
@@ -223,5 +224,7 @@ END OF REFERENCE RULES DOCUMENT"""
         return ValidationOutput.from_llm_response(result, llm_calls=1)
         
     except Exception as e:
-        return ValidationOutput.error_response(str(e), llm_calls=1)
+        raise DrugClassExtractionError(
+            f"Drug class validation failed for {input_data.drug_name}: {e}"
+        ) from e
 
