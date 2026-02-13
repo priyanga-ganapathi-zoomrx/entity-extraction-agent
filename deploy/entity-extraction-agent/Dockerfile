@@ -16,4 +16,4 @@ RUN python -m venv /app/venv
 RUN /app/venv/bin/pip install --upgrade pip
 RUN /app/venv/bin/pip install poetry
 
-RUN poetry install --no-interaction --no-ansi
+RUN /app/venv/bin/poetry install --no-interaction --no-ansi
