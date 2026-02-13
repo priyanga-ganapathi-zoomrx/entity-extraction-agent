@@ -188,12 +188,18 @@ class _EmsLogger:
             except Exception:
                 pass
 
-    # structlog also calls these on the underlying logger
+    # structlog proxies method names matching Python logging levels
+    # (debug, info, warning, error, critical) plus its own aliases
+    # (msg, err, warn, fatal) to the underlying logger.
     err = msg
+    error = msg
+    warn = msg
     warning = msg
     info = msg
     debug = msg
     fatal = msg
+    critical = msg
+    exception = msg
 
 
 class _EmsLoggerFactory:

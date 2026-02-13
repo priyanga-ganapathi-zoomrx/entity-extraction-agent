@@ -23,15 +23,15 @@ application_config:
     enabled: false
 
   volume_mount: "/app/entity-extraction-agent"
-  nodepool: autopilot
+  nodepool: autopilot-spot
 
 keda_config:
   type: temporal
-  max_replicas: 15
+  max_replicas: 1
   pollingInterval: 30
 
   temporal:
     namespace: default
     taskqueue: indication-extraction
     endpoint: temporal-frontend:7233
-    queuesize: "5"
+    queuesize: "1"
