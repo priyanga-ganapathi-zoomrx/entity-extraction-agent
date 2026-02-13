@@ -3,33 +3,25 @@
 ENVIRONMENT=dev
 IDLE_SHUTDOWN_MINUTES=5
 TEMPORAL_HOST=<TEMPORAL_SERVER_ADDRESS>
-TEMPORAL_NAMESPACE=default
-
+TEMPORAL_NAMESPACE=<NAMESPACE>
 
 LLM_BASE_URL=https://dev-cg-litellm.zoomrx.ai
 
 LANGFUSE_HOST=https://langfuse.zoomrx.ai
 
-
+GCS_PROJECT_ID=ferma-congress-dev
+GCS_BUCKET_NAME=fc-dev-entity-extraction-agent
+GOOGLE_APPLICATION_CREDENTIALS=
 
 INDICATION_LLM_MODEL=gemini-2.5-pro
 INDICATION_VALIDATION_LLM_MODEL=gemini-2.5-pro
 
-
-
-DRUG_EXTRACTION_MODEL=gemini-3-flash-preview
+DRUG_EXTRACTION_MODEL=gemini-2.5-pro
 DRUG_VALIDATION_MODEL=gemini-3-flash-preview
 
-
-
-DRUG_CLASS_REGIMEN_MODEL=gemini-3-flash-preview
-DRUG_CLASS_EXTRACTION_MODEL=gemini-3-flash-preview
+DRUG_CLASS_REGIMEN_MODEL=gemini-3-pro-preview
+DRUG_CLASS_EXTRACTION_MODEL=gemini-3-pro-preview
 DRUG_CLASS_GROUNDED_MODEL=gemini-3-flash-preview
 DRUG_CLASS_SELECTION_MODEL=gemini-3-flash-preview
 DRUG_CLASS_EXPLICIT_MODEL=gemini-3-flash-preview
 DRUG_CLASS_CONSOLIDATION_MODEL=gemini-3-flash-preview
-
-
-
-GCS_PROJECT_ID=ferma-congress-dev
-GCS_BUCKET_NAME="entity-extraction-agent-data-dev"
