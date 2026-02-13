@@ -16,4 +16,9 @@ RUN python -m venv /app/venv
 RUN /app/venv/bin/pip install --upgrade pip
 RUN /app/venv/bin/pip install poetry
 
-RUN /app/venv/bin/poetry install --no-interaction --no-ansi --no-root
+# Configure poetry to use existing venv instead of creating its own
+ENV VIRTUAL_ENV=/app/venv
+ENV PATH="/app/venv/bin:$PATH"
+
+RUN poetry config virtualenvs.create false
+RUN poetry install --no-interaction --no-ansi --no-root
