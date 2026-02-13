@@ -23,7 +23,9 @@ import csv
 import io
 import json
 import logging
+import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import AsyncIterator, Optional
 
@@ -444,6 +446,23 @@ Examples:
     if args.storage_path:
         print(f"Checkpoints: {args.storage_path}")
 
+    # --- EMS: batch_started ---
+    from src.agents.core.ems_logger import get_logger as _get_ems_logger
+
+    ems_logger = _get_ems_logger("batch")
+    batch_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    batch_start = time.time()
+
+    ems_logger.info(
+        "batch_started",
+        batch_id=batch_id,
+        total_items=len(items),
+        max_concurrent=args.max_concurrent,
+        pipelines=pipelines,
+        input_csv_path=args.input,
+        storage_path=args.storage_path,
+    )
+
     success_results = []
     partial_results = []
     failed_results = []
@@ -465,6 +484,27 @@ Examples:
         else:
             failed_results.append(result)
             print(f"  [FAILED]  {result.abstract_id}: {result.error}")
+
+    # --- EMS: batch_completed ---
+    duration_ms = int((time.time() - batch_start) * 1000)
+
+    if not failed_results and not partial_results:
+        batch_outcome = "success"
+    elif failed_results and not success_results and not partial_results:
+        batch_outcome = "failure"
+    else:
+        batch_outcome = "partial_success"
+
+    ems_logger.info(
+        "batch_completed",
+        batch_id=batch_id,
+        total_items=len(items),
+        success_count=len(success_results),
+        partial_count=len(partial_results),
+        failed_count=len(failed_results),
+        outcome=batch_outcome,
+        duration_ms=duration_ms,
+    )
 
     _print_batch_summary(
         total=len(items),

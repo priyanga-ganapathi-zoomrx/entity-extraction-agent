@@ -6,6 +6,7 @@ They:
 - Call the existing agent functions
 - Serialize Pydantic outputs to dicts for Temporal serialization
 - Let Temporal handle retries (configured in workflow execution)
+- Publish structured EMS events (success/failure) to Pub/Sub
 
 Best Practices Applied:
 - Activities are synchronous because underlying LLM calls use synchronous LangChain
@@ -14,8 +15,12 @@ Best Practices Applied:
 - Timeouts and retries configured at workflow level, not in activities
 """
 
+import time
+
 from temporalio import activity
 
+from src.agents.core.ems_logger import get_logger
+from src.agents.drug.config import config as drug_config
 from src.agents.drug.schemas import DrugInput, ValidationInput
 from src.temporal.idle_shutdown import track_activity
 
@@ -60,16 +65,64 @@ def extract_drugs(input_data: DrugInput) -> dict:
         f"Extracting drugs for abstract {input_data.abstract_id}"
     )
     
-    # Create tracker and call agent with it
+    ems_logger = get_logger("drug_extraction")
+    info = activity.info()
     tracker = TokenUsageCallbackHandler()
-    result = _extract_drugs(input_data, callbacks=[tracker])
+    start = time.time()
     
-    # Serialize Pydantic model to dict with token metadata for workflow
-    return {
-        **result.model_dump(),
-        "_token_usage": tracker.usage.to_dict(),
-        "_llm_calls": tracker.llm_calls,
-    }
+    try:
+        result = _extract_drugs(input_data, callbacks=[tracker])
+        duration_ms = int((time.time() - start) * 1000)
+        result_dict = result.model_dump()
+        
+        ems_logger.info(
+            "step_completed",
+            abstract_id=input_data.abstract_id,
+            model=drug_config.EXTRACTION_MODEL,
+            input_data={
+                "abstract_id": input_data.abstract_id,
+                "abstract_title": input_data.abstract_title,
+            },
+            output={
+                "primary_drugs": result_dict.get("primary_drugs"),
+                "secondary_drugs": result_dict.get("secondary_drugs"),
+                "comparator_drugs": result_dict.get("comparator_drugs"),
+            },
+            outcome="success",
+            llm_calls=tracker.llm_calls,
+            input_tokens=tracker.usage.input_tokens,
+            output_tokens=tracker.usage.output_tokens,
+            total_tokens=tracker.usage.total_tokens,
+            duration_ms=duration_ms,
+            attempt=info.attempt,
+            workflow_run_id=info.workflow_run_id,
+        )
+        
+        # Serialize Pydantic model to dict with token metadata for workflow
+        return {
+            **result_dict,
+            "_token_usage": tracker.usage.to_dict(),
+            "_llm_calls": tracker.llm_calls,
+        }
+        
+    except Exception as e:
+        duration_ms = int((time.time() - start) * 1000)
+        ems_logger.error(
+            "step_failed",
+            abstract_id=input_data.abstract_id,
+            model=drug_config.EXTRACTION_MODEL,
+            input_data={
+                "abstract_id": input_data.abstract_id,
+                "abstract_title": input_data.abstract_title,
+            },
+            error=str(e),
+            outcome="failure",
+            exc_info=True,
+            duration_ms=duration_ms,
+            attempt=info.attempt,
+            workflow_run_id=info.workflow_run_id,
+        )
+        raise
 
 
 @activity.defn(name="validate_drugs")
@@ -116,13 +169,62 @@ def validate_drugs(input_data: ValidationInput) -> dict:
         f"Validating drugs for abstract {input_data.abstract_id}"
     )
     
-    # Create tracker and call agent with it
+    ems_logger = get_logger("drug_validation")
+    info = activity.info()
     tracker = TokenUsageCallbackHandler()
-    result = _validate_drugs(input_data, callbacks=[tracker])
+    start = time.time()
     
-    # Serialize Pydantic model to dict with token metadata for workflow
-    return {
-        **result.model_dump(),
-        "_token_usage": tracker.usage.to_dict(),
-        "_llm_calls": tracker.llm_calls,
-    }
+    try:
+        result = _validate_drugs(input_data, callbacks=[tracker])
+        duration_ms = int((time.time() - start) * 1000)
+        result_dict = result.model_dump()
+        
+        ems_logger.info(
+            "step_completed",
+            abstract_id=input_data.abstract_id,
+            model=drug_config.VALIDATION_MODEL,
+            input_data={
+                "abstract_id": input_data.abstract_id,
+                "abstract_title": input_data.abstract_title,
+                "primary_drugs": input_data.extraction_result.get("primary_drugs"),
+            },
+            output={
+                "validation_status": result_dict.get("validation_status"),
+                "validation_confidence": result_dict.get("validation_confidence"),
+            },
+            outcome="success",
+            llm_calls=tracker.llm_calls,
+            input_tokens=tracker.usage.input_tokens,
+            output_tokens=tracker.usage.output_tokens,
+            total_tokens=tracker.usage.total_tokens,
+            duration_ms=duration_ms,
+            attempt=info.attempt,
+            workflow_run_id=info.workflow_run_id,
+        )
+        
+        # Serialize Pydantic model to dict with token metadata for workflow
+        return {
+            **result_dict,
+            "_token_usage": tracker.usage.to_dict(),
+            "_llm_calls": tracker.llm_calls,
+        }
+        
+    except Exception as e:
+        duration_ms = int((time.time() - start) * 1000)
+        ems_logger.error(
+            "step_failed",
+            abstract_id=input_data.abstract_id,
+            model=drug_config.VALIDATION_MODEL,
+            input_data={
+                "abstract_id": input_data.abstract_id,
+                "abstract_title": input_data.abstract_title,
+                "primary_drugs": input_data.extraction_result.get("primary_drugs"),
+            },
+            error=str(e),
+            outcome="failure",
+            exc_info=True,
+            duration_ms=duration_ms,
+            attempt=info.attempt,
+            workflow_run_id=info.workflow_run_id,
+        )
+        raise
