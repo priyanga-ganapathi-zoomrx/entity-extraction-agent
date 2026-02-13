@@ -1,6 +1,6 @@
 ARG PROJECT_ID
 ARG ENV
-FROM us-docker.pkg.dev/${PROJECT_ID}/${ENV}/python/3.12:latest
+FROM us-docker.pkg.dev/${PROJECT_ID}/${ENV}/python/3.11:latest
 LABEL maintainer="ZoomRx"
 RUN sudo apt-get --allow-releaseinfo-change update;
 
