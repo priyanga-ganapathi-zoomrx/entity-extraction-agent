@@ -4,14 +4,16 @@ FROM us-docker.pkg.dev/${PROJECT_ID}/${ENV}/python/3.11:latest
 LABEL maintainer="ZoomRx"
 RUN sudo apt-get --allow-releaseinfo-change update;
 
-# Install Poetry
-RUN pip install poetry
-
 RUN mkdir -p /app/entity-extraction-agent
 COPY . /app/entity-extraction-agent
 WORKDIR /app/entity-extraction-agent
 RUN sudo chown -R ferma:ferma /app
 
-# Create venv inside the project directory (.venv/)
-RUN poetry config virtualenvs.in-project true
+# Create venv
+RUN python -m venv /app/venv
+
+# Install pip and poetry
+RUN /app/venv/bin/pip install --upgrade pip
+RUN /app/venv/bin/pip install poetry
+
 RUN poetry install --no-interaction --no-ansi
