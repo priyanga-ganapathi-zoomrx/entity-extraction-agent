@@ -1,4 +1,4 @@
-@Library('congress-ci-cd@main') _
+@Library('congress-ci-cd@congress-temporal-chart-changes') _
 
 ferma_congress_dev.call(
   repo_url: "https://github.com/ZoomRx/entity-extraction-agent.git",
