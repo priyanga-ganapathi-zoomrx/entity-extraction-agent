@@ -17,7 +17,7 @@ application_config:
 
   entrypoint:
     enabled: true
-    command: "/app/entity-extraction-agent/.venv/bin/python -m src.temporal.workers.drug_worker"
+    command: "python -m src.temporal.workers.drug_worker"
 
   filebeat:
     enabled: false
@@ -31,7 +31,7 @@ keda_config:
   pollingInterval: 30
 
   temporal:
-    namespace: default
+    namespace: entity-extraction-agent
     taskqueue: drug-activities
-    endpoint: temporal-frontend:7233
+    endpoint: dev-temporal-server-service.dev-temporal-app.svc.cluster.local:7233
     queuesize: "1"

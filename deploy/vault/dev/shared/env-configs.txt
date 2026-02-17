@@ -2,16 +2,23 @@
 
 ENVIRONMENT=dev
 IDLE_SHUTDOWN_MINUTES=5
-TEMPORAL_HOST=<TEMPORAL_SERVER_ADDRESS>
-TEMPORAL_NAMESPACE=<NAMESPACE>
+TEMPORAL_HOST=dev-temporal-server-service.dev-temporal-app.svc.cluster.local:7233
+TEMPORAL_NAMESPACE=entity-extraction-agent
 
-LLM_BASE_URL=https://dev-cg-litellm.zoomrx.ai
+LLM_BASE_URL=http://litellm-service.dev-litellm-app.svc.cluster.local:4000
 
-LANGFUSE_HOST=https://langfuse.zoomrx.ai
+LANGFUSE_HOST=https://insights-llm.zoomrx.ai
 
 GCS_PROJECT_ID=ferma-congress-dev
 GCS_BUCKET_NAME=fc-dev-entity-extraction-agent
-GOOGLE_APPLICATION_CREDENTIALS=
+GOOGLE_APPLICATION_CREDENTIALS=/app/entity-extraction-agent/serviceaccount.json
+
+EMS_ENABLED=true
+EMS_PUBSUB_TOPIC=ferma-congress-entity-extraction-agent-logs
+
+SENTRY_ENABLED=true
+SENTRY_DSN=https://a2f1a1ed3c04f30e2f4fb49d84317093@insights-sentry.ferma.ai/50
+SENTRY_ENVIRONMENT=dev
 
 INDICATION_LLM_MODEL=gemini-2.5-pro
 INDICATION_VALIDATION_LLM_MODEL=gemini-2.5-pro
