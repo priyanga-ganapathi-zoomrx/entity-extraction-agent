@@ -62,6 +62,32 @@ def _init_sentry() -> None:
     if not settings.sentry.SENTRY_ENABLED or not settings.sentry.SENTRY_DSN:
         return
 
+    _MAX_VAR_BYTES = 512
+
+    def _before_send(event, hint):
+        """Trim oversized local-variable representations so the envelope
+        stays within Sentry's size limit (~200 KB for self-hosted).
+
+        Some exceptions carry large payloads (e.g. Tavily search results)
+        in their call-stack variables.  Without trimming the server returns
+        HTTP 400 "envelope exceeded size limits".
+        """
+        for exc_val in event.get("exception", {}).get("values", []):
+            for frame in exc_val.get("stacktrace", {}).get("frames", []):
+                frame_vars = frame.get("vars")
+                if not frame_vars:
+                    continue
+                for key in list(frame_vars):
+                    try:
+                        size = len(json.dumps(frame_vars[key], default=str))
+                    except Exception:
+                        size = len(str(frame_vars[key]))
+                    if size > _MAX_VAR_BYTES:
+                        short = str(frame_vars[key])[:200]
+                        frame_vars[key] = f"{short}…[truncated, was {size}B]"
+
+        return event
+
     sentry_sdk.init(
         dsn=settings.sentry.SENTRY_DSN,
         environment=settings.sentry.SENTRY_ENVIRONMENT,
@@ -69,6 +95,7 @@ def _init_sentry() -> None:
         # via _sentry_processor to avoid double-capture in Temporal workers.
         default_integrations=False,
         traces_sample_rate=0,
+        before_send=_before_send,
     )
 
 
