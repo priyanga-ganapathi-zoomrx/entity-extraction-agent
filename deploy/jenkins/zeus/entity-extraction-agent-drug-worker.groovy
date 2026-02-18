@@ -1,6 +1,6 @@
-@Library('congress-ci-cd@congress-temporal-chart-changes') _
+@Library('congress-ci-cd@main') _
 
-ferma_congress_dev.call(
+ferma_congress_zeus.call(
   repo_url: "https://github.com/ZoomRx/entity-extraction-agent.git",
   deployment_type: "backend",
   application_name: "entity-extraction-agent-drug-worker",
