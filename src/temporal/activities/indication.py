@@ -24,15 +24,20 @@ import json
 import re
 import time
 
+from langchain_core.messages import AIMessage
+from pydantic import ValidationError
 from temporalio import activity
 
 from src.agents.core.ems_logger import get_logger
+from src.agents.core.token_tracking import TokenUsageCallbackHandler
 from src.agents.indication.config import config as ind_config
+from src.agents.indication.extraction_agent import IndicationAgent
 from src.agents.indication.schemas import (
     IndicationInput,
     ExtractionLLMResponse,
     ValidationLLMResponse,
 )
+from src.agents.indication.validation_agent import IndicationValidationAgent
 from src.temporal.idle_shutdown import track_activity
 
 
@@ -60,8 +65,6 @@ def _parse_json_from_message(content: str, model_class):
         ValueError: If JSON extraction or parsing fails
         IndicationExtractionError: If JSON is valid but doesn't match schema (missing required fields)
     """
-    from pydantic import ValidationError
-    
     # Try to extract JSON from markdown code blocks (take the last one,
     # since LLM may echo the input JSON before providing the output JSON)
     json_matches = re.findall(r"```(?:json)?\s*([\s\S]*?)\s*```", content)
@@ -111,8 +114,6 @@ def _extract_result_from_messages(messages: list, model_class) -> dict:
         IndicationExtractionError: If no valid response found or schema validation fails
             (triggers Temporal retry)
     """
-    from langchain_core.messages import AIMessage
-    
     # Find last AI message with content
     for msg in reversed(messages):
         if isinstance(msg, AIMessage) and msg.content:
@@ -175,9 +176,6 @@ def extract_indication(input_data: IndicationInput) -> dict:
         >>> result["generated_indication"]
         "EGFR-positive non-small cell lung cancer"
     """
-    from src.agents.indication.extraction_agent import IndicationAgent
-    from src.agents.core.token_tracking import TokenUsageCallbackHandler
-    
     activity.logger.info(
         f"Extracting indication from abstract {input_data.abstract_id}"
     )
@@ -311,9 +309,6 @@ def validate_indication(
         >>> result["validation_status"]
         "PASS"
     """
-    from src.agents.indication.validation_agent import IndicationValidationAgent
-    from src.agents.core.token_tracking import TokenUsageCallbackHandler
-    
     activity.logger.info(
         f"Validating indication extraction for abstract {input_data.abstract_id}"
     )

@@ -83,8 +83,8 @@ class Timeouts:
     # Storage/checkpoint activities (typically <1s)
     STORAGE = timedelta(seconds=30)
     
-    # Fast LLM activities - GPT-4 (typically 5-15s)
-    FAST_LLM = timedelta(minutes=2)
+    # Fast LLM activities - Gemini (typically 5-15s, preview models can spike to 90s+)
+    FAST_LLM = timedelta(minutes=4)
     
     # Slow LLM activities - Sonnet 4.5 (typically 30-60s)
     SLOW_LLM = timedelta(minutes=5)

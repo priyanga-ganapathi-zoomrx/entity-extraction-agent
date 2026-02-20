@@ -34,6 +34,8 @@ import time
 from temporalio import activity
 
 from src.agents.core.ems_logger import get_logger
+from src.agents.core.storage import get_storage_client
+from src.agents.core.token_tracking import TokenUsageCallbackHandler
 from src.agents.drug_class.config import config as dc_config
 from src.agents.drug_class.schemas import (
     RegimenInput,
@@ -43,6 +45,13 @@ from src.agents.drug_class.schemas import (
     ConsolidationInput,
     ValidationInput as DrugClassValidationInput,
 )
+from src.agents.drug_class.step1_regimen import identify_regimen
+from src.agents.drug_class.step2_search import fetch_search_results
+from src.agents.drug_class.step2_extraction import extract_with_tavily, extract_with_grounded
+from src.agents.drug_class.step3_selection import select_drug_class
+from src.agents.drug_class.step4_explicit import extract_explicit_classes
+from src.agents.drug_class.step5_consolidation import consolidate_drug_classes
+from src.agents.drug_class.validation import validate_drug_class
 from src.temporal.idle_shutdown import track_activity
 
 
@@ -80,9 +89,6 @@ def step1_regimen(input_data: RegimenInput) -> dict:
         >>> result
         ["rituximab", "cyclophosphamide", "doxorubicin", "vincristine", "prednisone"]
     """
-    from src.agents.drug_class.step1_regimen import identify_regimen
-    from src.agents.core.token_tracking import TokenUsageCallbackHandler
-    
     activity.logger.info(
         f"Step 1 - Regimen identification for drug '{input_data.drug}' "
         f"in abstract {input_data.abstract_id}"
@@ -174,9 +180,6 @@ def step2_fetch_search_results(
         >>> len(result["drug_class_results"])
         5
     """
-    from src.agents.drug_class.step2_search import fetch_search_results
-    from src.agents.core.storage import get_storage_client
-    
     activity.logger.info(
         f"Step 2 - Fetching search results for drug '{drug}'"
     )
@@ -262,9 +265,6 @@ def step2_extract_with_tavily(input_data: DrugClassExtractionInput) -> dict:
     Raises:
         DrugClassExtractionError: If extraction fails (triggers Temporal retry)
     """
-    from src.agents.drug_class.step2_extraction import extract_with_tavily
-    from src.agents.core.token_tracking import TokenUsageCallbackHandler
-    
     activity.logger.info(
         f"Step 2 - Tavily extraction for drug '{input_data.drug}' "
         f"in abstract {input_data.abstract_id}"
@@ -352,9 +352,6 @@ def step2_extract_with_grounded(input_data: DrugClassExtractionInput) -> dict:
     Raises:
         DrugClassExtractionError: If extraction fails (triggers Temporal retry)
     """
-    from src.agents.drug_class.step2_extraction import extract_with_grounded
-    from src.agents.core.token_tracking import TokenUsageCallbackHandler
-    
     activity.logger.info(
         f"Step 2 - Grounded extraction (fallback) for drug '{input_data.drug}' "
         f"in abstract {input_data.abstract_id}"
@@ -449,9 +446,6 @@ def step3_selection(input_data: SelectionInput) -> dict:
     Note:
         If only one unique class exists, no LLM call is made (optimization).
     """
-    from src.agents.drug_class.step3_selection import select_drug_class
-    from src.agents.core.token_tracking import TokenUsageCallbackHandler
-    
     activity.logger.info(
         f"Step 3 - Class selection for drug '{input_data.drug_name}' "
         f"in abstract {input_data.abstract_id}"
@@ -542,9 +536,6 @@ def step4_explicit(input_data: ExplicitExtractionInput) -> dict:
     Note:
         Returns ["NA"] if title is empty.
     """
-    from src.agents.drug_class.step4_explicit import extract_explicit_classes
-    from src.agents.core.token_tracking import TokenUsageCallbackHandler
-    
     activity.logger.info(
         f"Step 4 - Explicit extraction for abstract {input_data.abstract_id}"
     )
@@ -636,9 +627,6 @@ def step5_consolidation(input_data: ConsolidationInput) -> dict:
     Note:
         Returns input classes unchanged if no drug selections to compare.
     """
-    from src.agents.drug_class.step5_consolidation import consolidate_drug_classes
-    from src.agents.core.token_tracking import TokenUsageCallbackHandler
-    
     activity.logger.info(
         f"Step 5 - Consolidation for abstract {input_data.abstract_id}"
     )
@@ -737,9 +725,6 @@ def validate_drug_class_activity(input_data: DrugClassValidationInput) -> dict:
     Raises:
         DrugClassExtractionError: If validation fails (triggers Temporal retry)
     """
-    from src.agents.drug_class.validation import validate_drug_class
-    from src.agents.core.token_tracking import TokenUsageCallbackHandler
-    
     activity.logger.info(
         f"Validating drug class for drug '{input_data.drug_name}' "
         f"in abstract {input_data.abstract_id}"

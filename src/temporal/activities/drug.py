@@ -20,8 +20,11 @@ import time
 from temporalio import activity
 
 from src.agents.core.ems_logger import get_logger
+from src.agents.core.token_tracking import TokenUsageCallbackHandler
 from src.agents.drug.config import config as drug_config
+from src.agents.drug.extraction_agent import extract_drugs as _extract_drugs
 from src.agents.drug.schemas import DrugInput, ValidationInput
+from src.agents.drug.validation_agent import validate_drugs as _validate_drugs
 from src.temporal.idle_shutdown import track_activity
 
 
@@ -56,11 +59,6 @@ def extract_drugs(input_data: DrugInput) -> dict:
         >>> result["primary_drugs"]
         ["pembrolizumab"]
     """
-    # Import here to avoid circular imports and keep activity lightweight
-    from src.agents.drug.extraction_agent import extract_drugs as _extract_drugs
-    from src.agents.core.token_tracking import TokenUsageCallbackHandler
-    
-    # Log activity info for debugging
     activity.logger.info(
         f"Extracting drugs for abstract {input_data.abstract_id}"
     )
@@ -160,11 +158,6 @@ def validate_drugs(input_data: ValidationInput) -> dict:
         >>> result["validation_status"]
         "PASS"
     """
-    # Import here to avoid circular imports and keep activity lightweight
-    from src.agents.drug.validation_agent import validate_drugs as _validate_drugs
-    from src.agents.core.token_tracking import TokenUsageCallbackHandler
-    
-    # Log activity info for debugging
     activity.logger.info(
         f"Validating drugs for abstract {input_data.abstract_id}"
     )
