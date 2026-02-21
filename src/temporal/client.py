@@ -7,11 +7,14 @@ This module provides:
 - Retry CSV generation for failed/partial abstracts
 
 Usage:
-    # Run batch extraction
+    # Run batch extraction (storage defaults to input CSV's parent directory)
+    python -m src.temporal.client --input data/abstracts.csv
+
+    # Explicit storage path
     python -m src.temporal.client --input data/abstracts.csv --storage_path data/output
 
-    # Retry failed items from a previous batch
-    python -m src.temporal.client --input data/output/failed_20260206_123456.csv --storage_path data/output
+    # GCS input (storage defaults to gs://bucket/ASCO2025/drug/)
+    python -m src.temporal.client --input gs://bucket/ASCO2025/drug/abstracts.csv
 
 For workflow status inspection, use the Temporal UI or CLI:
     temporal workflow list --query "ExecutionStatus = 'Failed'"
@@ -344,8 +347,7 @@ def _print_batch_summary(
     print(f"  Partial:  {len(partial_results)}")
     print(f"  Failed:   {len(failed_results)}")
 
-    # Determine base path for retry CSVs
-    base_path = storage_path if storage_path else "data/output"
+    base_path = storage_path
 
     # Build retry CSV paths (works for both local and GCS)
     if base_path.startswith("gs://"):
@@ -381,17 +383,23 @@ async def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    # Run batch extraction
+    # Run batch extraction (storage defaults to input CSV's parent directory)
+    python -m src.temporal.client --input data/abstracts.csv
+
+    # Explicit storage path
     python -m src.temporal.client --input data/abstracts.csv --storage_path data/output
 
+    # GCS input (storage defaults to gs://bucket/ASCO2025/drug/)
+    python -m src.temporal.client --input gs://bucket/ASCO2025/drug/abstracts.csv
+
     # Limit concurrency and abstracts
-    python -m src.temporal.client --input data/abstracts.csv --storage_path data/output --max_concurrent 100 --limit 10
+    python -m src.temporal.client --input data/abstracts.csv --max_concurrent 100 --limit 10
 
     # Run specific pipelines
-    python -m src.temporal.client --input data/abstracts.csv --storage_path data/output --pipelines drug,indication
+    python -m src.temporal.client --input data/abstracts.csv --pipelines drug,indication
 
     # Retry failed items from a previous batch
-    python -m src.temporal.client --input data/output/failed_20260206_123456.csv --storage_path data/output
+    python -m src.temporal.client --input data/output/failed_20260206_123456.csv
         """,
     )
     parser.add_argument(
@@ -408,7 +416,7 @@ Examples:
     parser.add_argument(
         "--storage_path",
         default="",
-        help="Base path for checkpoints (gs://bucket/prefix or local path)",
+        help="Base path for checkpoints (gs://bucket/prefix or local path). Defaults to input CSV's parent directory.",
     )
     parser.add_argument(
         "--limit",
@@ -422,6 +430,13 @@ Examples:
         help="Comma-separated pipelines to run (default: drug,drug_class,indication)",
     )
     args = parser.parse_args()
+
+    # Derive storage_path from input CSV's parent directory when not explicitly set
+    if not args.storage_path:
+        if args.input.startswith("gs://"):
+            args.storage_path = args.input.rsplit("/", 1)[0]
+        else:
+            args.storage_path = str(Path(args.input).parent)
 
     # Parse pipelines
     pipelines = [p.strip() for p in args.pipelines.split(",") if p.strip()]
@@ -443,8 +458,7 @@ Examples:
     # Run batch extraction
     print(f"Starting batch extraction (max_concurrent: {args.max_concurrent})...")
     print(f"Pipelines: {pipelines}")
-    if args.storage_path:
-        print(f"Checkpoints: {args.storage_path}")
+    print(f"Storage: {args.storage_path}")
 
     # --- EMS: batch_started ---
     from src.agents.core.ems_logger import get_logger as _get_ems_logger
