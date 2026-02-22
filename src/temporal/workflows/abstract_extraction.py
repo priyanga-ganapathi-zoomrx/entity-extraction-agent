@@ -558,6 +558,7 @@ class AbstractExtractionWorkflow:
         validation_data = await self._run_drug_class_validation(
             input, all_extraction_results
         )
+        val_token_usage, val_llm_calls = self._extract_token_metadata(validation_data)
         self._output.drug_class.validation_results = validation_data.get("results", [])
         if validation_data.get("errors"):
             self._output.errors.extend(validation_data["errors"])
@@ -565,7 +566,12 @@ class AbstractExtractionWorkflow:
                 "; ".join(validation_data["errors"])
             )
         else:
-            self._status.drug_class.validation = StepStatus.success()
+            self._status.drug_class.validation = StepStatus.success(
+                llm_calls=val_llm_calls,
+                tokens=val_token_usage.get("total_tokens", 0) if val_token_usage else 0,
+                input_tokens=val_token_usage.get("input_tokens", 0) if val_token_usage else 0,
+                output_tokens=val_token_usage.get("output_tokens", 0) if val_token_usage else 0,
+            )
 
         await self._save_status(input)
         workflow.logger.info(
@@ -748,6 +754,8 @@ class AbstractExtractionWorkflow:
 
         results = []
         errors = []
+        total_tokens = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+        total_llm_calls = 0
 
         for component, extraction_result in extraction_results.items():
             drug_classes = extraction_result.get("drug_classes", [])
@@ -777,8 +785,11 @@ class AbstractExtractionWorkflow:
                     start_to_close_timeout=Timeouts.FAST_LLM,
                     retry_policy=RetryPolicies.FAST_LLM,
                 )
-                # Strip token metadata before storing
-                self._extract_token_metadata(validation_result)
+                v_usage, v_calls = self._extract_token_metadata(validation_result)
+                total_llm_calls += v_calls
+                if v_usage:
+                    for k in total_tokens:
+                        total_tokens[k] += v_usage.get(k, 0)
                 results.append({
                     "drug_name": component, "validation": validation_result,
                 })
@@ -790,4 +801,7 @@ class AbstractExtractionWorkflow:
         # Only checkpoint if all validations passed - allows retry of failures
         if not errors:
             await self._save_checkpoint(input, "drug_class_validation", validation_data)
+        # Attach token metadata AFTER checkpointing so it's not persisted
+        validation_data["_token_usage"] = total_tokens
+        validation_data["_llm_calls"] = total_llm_calls
         return validation_data
