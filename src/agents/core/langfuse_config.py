@@ -1,24 +1,30 @@
 """Langfuse configuration and singleton client.
 
 Provides a single Langfuse instance for use across all agents.
+Tracing can be disabled via LANGFUSE_TRACING_ENABLED=false env variable.
 """
 
-from pydantic import BaseModel, Field
+import os
+
 from langfuse import Langfuse
 
 from src.agents.core.config import settings
 
 
-# =============================================================================
-# Singleton Langfuse Client
-# =============================================================================
-
 def _create_langfuse_client() -> Langfuse | None:
-    """Create Langfuse client if configured.
+    """Create Langfuse client if configured and tracing is enabled.
+    
+    When tracing is disabled, sets LANGFUSE_TRACING_ENABLED in os.environ
+    so the SDK's @observe decorator also becomes a no-op (pydantic-settings
+    reads .env but does not propagate values to os.environ).
     
     Returns:
-        Langfuse client instance, or None if not configured
+        Langfuse client instance, or None if not configured or tracing disabled
     """
+    if not settings.langfuse.LANGFUSE_TRACING_ENABLED:
+        os.environ["LANGFUSE_TRACING_ENABLED"] = "false"
+        return None
+
     if not settings.langfuse.LANGFUSE_PUBLIC_KEY or not settings.langfuse.LANGFUSE_SECRET_KEY:
         return None
     
@@ -36,41 +42,5 @@ langfuse = _create_langfuse_client()
 
 
 def is_langfuse_enabled() -> bool:
-    """Check if Langfuse is configured and available."""
+    """Check if Langfuse is configured, available, and tracing is enabled."""
     return langfuse is not None
-
-
-# =============================================================================
-# Backward Compatibility (for drug_class and other modules)
-# =============================================================================
-
-class LangfuseConfig(BaseModel):
-    """A data class for storing Langfuse configuration settings.
-    
-    DEPRECATED: Use `langfuse` singleton instead.
-    Kept for backward compatibility with drug_class and other modules.
-    """
-    public_key: str = Field(..., description="Langfuse public key")
-    secret_key: str = Field(..., description="Langfuse secret key")
-    host: str = Field(
-        default=settings.langfuse.LANGFUSE_HOST, description="Langfuse host URL"
-    )
-
-
-def get_langfuse_config() -> LangfuseConfig | None:
-    """Get Langfuse configuration from environment settings.
-    
-    DEPRECATED: Use `langfuse` singleton and `is_langfuse_enabled()` instead.
-    Kept for backward compatibility with drug_class and other modules.
-    
-    Returns:
-        LangfuseConfig: Configured Langfuse settings, or None if not configured
-    """
-    if not settings.langfuse.LANGFUSE_PUBLIC_KEY or not settings.langfuse.LANGFUSE_SECRET_KEY:
-        return None
-
-    return LangfuseConfig(
-        public_key=settings.langfuse.LANGFUSE_PUBLIC_KEY,
-        secret_key=settings.langfuse.LANGFUSE_SECRET_KEY,
-        host=settings.langfuse.LANGFUSE_HOST,
-    )

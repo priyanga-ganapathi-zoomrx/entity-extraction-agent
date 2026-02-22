@@ -1,73 +1,95 @@
-"""Generic prompt loading utilities for all agents."""
+"""Generic prompt loading utilities for all agents.
 
+Loads prompts from GCS bucket (primary) with local file fallback.
+Prompts are cached per process lifetime to avoid repeated fetching.
+"""
+
+import logging
+import os
 from pathlib import Path
-from typing import Optional
 
-from langfuse import Langfuse
+from google.cloud import storage as gcs_storage
 
 from src.agents.core.config import settings
+from src.agents.core.ems_logger import get_logger
+
+logger = logging.getLogger(__name__)
+ems_logger = get_logger("prompt_loader")
+
+_prompt_cache: dict[str, tuple[str, str]] = {}
 
 
 def load_prompt(
     prompt_name: str,
     prompts_dir: Path,
-    langfuse_client: Optional[Langfuse] = None,
-    fallback_to_file: bool = True,
 ) -> tuple[str, str]:
-    """Load prompt from Langfuse or fallback to local file.
+    """Load prompt from GCS bucket or fallback to local file.
+
+    GCS path convention: prompts/{agent_type}/{prompt_name}.md
+    where agent_type is derived from prompts_dir (its parent directory name).
 
     Args:
-        prompt_name: Name of the prompt in Langfuse (also used as filename without extension)
-        prompts_dir: Directory containing local prompt files
-        langfuse_client: Optional Langfuse client. If None, creates one using settings.
-        fallback_to_file: If True, fallback to local file on Langfuse failure
+        prompt_name: Prompt filename without extension (e.g., "DRUG_EXTRACTION_SYSTEM_PROMPT")
+        prompts_dir: Directory containing local prompt files (used for fallback and agent_type derivation)
 
     Returns:
-        tuple[str, str]: (prompt_content, version) - version is "local" if from file
-
-    Raises:
-        Exception: If both Langfuse and file loading fail
+        tuple[str, str]: (prompt_content, version)
+            - version is "gcs:<updated_timestamp>" when loaded from GCS
+            - version is "local" when loaded from local file
     """
-    # TODO: Remove this after ASCO GI
-    return _load_from_file(prompt_name, prompts_dir)
-    # Skip Langfuse if not configured
-    if not langfuse_client and not settings.langfuse.LANGFUSE_PUBLIC_KEY:
-        return _load_from_file(prompt_name, prompts_dir)
+    if prompt_name in _prompt_cache:
+        return _prompt_cache[prompt_name]
 
-    # Try Langfuse
-    try:
-        client = langfuse_client or Langfuse(
-            public_key=settings.langfuse.LANGFUSE_PUBLIC_KEY,
-            secret_key=settings.langfuse.LANGFUSE_SECRET_KEY,
-            host=settings.langfuse.LANGFUSE_HOST,
-        )
-        print(f"ℹ Fetching prompt '{prompt_name}' from Langfuse...")
-        langfuse_prompt = client.get_prompt(prompt_name)
+    if settings.gcs.GCS_BUCKET_NAME:
+        try:
+            result = _load_from_gcs(prompt_name, prompts_dir)
+            _prompt_cache[prompt_name] = result
+            return result
+        except Exception as e:
+            ems_logger.error("gcs_prompt_load_failed", prompt_name=prompt_name, error=str(e))
 
-        if hasattr(langfuse_prompt, "prompt"):
-            content = langfuse_prompt.prompt
-        elif hasattr(langfuse_prompt, "get_langchain_prompt"):
-            content = langfuse_prompt.get_langchain_prompt()
-        else:
-            content = str(langfuse_prompt)
+    result = _load_from_file(prompt_name, prompts_dir)
+    _prompt_cache[prompt_name] = result
+    return result
 
-        version = str(getattr(langfuse_prompt, "version", "unknown"))
-        print(f"✓ Loaded prompt from Langfuse (version: {version})")
-        return content.strip(), version
 
-    except Exception as e:
-        print(f"✗ Langfuse error: {e}")
+def _load_from_gcs(prompt_name: str, prompts_dir: Path) -> tuple[str, str]:
+    """Load prompt from GCS bucket.
 
-        if not fallback_to_file:
-            raise
+    Uses google.cloud.storage directly to access blob metadata (updated timestamp).
+    """
+    if settings.gcs.GOOGLE_APPLICATION_CREDENTIALS:
+        creds_path = settings.gcs.GOOGLE_APPLICATION_CREDENTIALS.strip()
+        if creds_path and os.path.exists(creds_path):
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
 
-        return _load_from_file(prompt_name, prompts_dir)
+    project_id = settings.gcs.GCS_PROJECT_ID.strip() if settings.gcs.GCS_PROJECT_ID else None
+    client = gcs_storage.Client(project=project_id) if project_id else gcs_storage.Client()
+
+    bucket = client.bucket(settings.gcs.GCS_BUCKET_NAME)
+    agent_type = prompts_dir.parent.name
+    blob_path = f"prompts/{agent_type}/{prompt_name}.md"
+    blob = bucket.blob(blob_path)
+
+    content = blob.download_as_text()
+    content = content.lstrip("\ufeff").strip()
+
+    blob.reload()
+    updated = blob.updated.isoformat() if blob.updated else "unknown"
+    version = f"gcs:{updated}"
+
+    logger.info("Loaded prompt '%s' from GCS (version: %s)", prompt_name, version)
+    return content, version
 
 
 def _load_from_file(prompt_name: str, prompts_dir: Path) -> tuple[str, str]:
     """Load prompt from local file."""
     prompt_file = prompts_dir / f"{prompt_name}.md"
-    print(f"ℹ Loading prompt from {prompt_file}...")
+    logger.info("Loading prompt from %s", prompt_file)
     content = prompt_file.read_text(encoding="utf-8")
-    print("✓ Loaded prompt from local file")
     return content.strip(), "local"
+
+
+def clear_prompt_cache() -> None:
+    """Clear the prompt cache. Useful for testing or after prompt updates."""
+    _prompt_cache.clear()

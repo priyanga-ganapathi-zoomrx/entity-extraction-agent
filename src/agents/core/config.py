@@ -14,6 +14,9 @@ class LangfuseSettings(BaseSettings):
     LANGFUSE_HOST: str = Field(
         default="https://cloud.langfuse.com", description="Langfuse host URL"
     )
+    LANGFUSE_TRACING_ENABLED: bool = Field(
+        default=True, description="Enable/disable Langfuse tracing"
+    )
 
 
 class LLMSettings(BaseSettings):

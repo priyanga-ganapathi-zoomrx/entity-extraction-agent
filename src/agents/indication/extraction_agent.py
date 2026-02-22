@@ -16,6 +16,7 @@ from langgraph.prebuilt import ToolNode
 from typing_extensions import TypedDict
 
 from src.agents.core import settings, create_llm, LLMConfig
+from src.agents.core.langfuse_config import is_langfuse_enabled
 from src.agents.indication.config import config
 from src.agents.indication.prompts import get_extraction_prompt
 from src.agents.indication.tools import get_tools
@@ -43,8 +44,7 @@ class IndicationAgent:
         self.system_prompt, self.prompt_version = get_extraction_prompt()
         self.graph = self._build()
         
-        # Check if Langfuse is configured
-        self._langfuse_enabled = bool(settings.langfuse.LANGFUSE_PUBLIC_KEY)
+        self._langfuse_enabled = is_langfuse_enabled()
     
     def _build(self) -> StateGraph:
         """Build the LangGraph state graph."""
