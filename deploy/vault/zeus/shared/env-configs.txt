@@ -1,0 +1,36 @@
+# Vault Path: app-configuration/ferma-congress/zeus/<APPLICATION_NAME>/.env/configs
+# key: #environment_variables
+
+ENVIRONMENT=zeus
+IDLE_SHUTDOWN_MINUTES=5
+TEMPORAL_HOST=zeus-temporal-server-service.zeus-temporal-app.svc.cluster.local:7233
+TEMPORAL_NAMESPACE=entity-extraction-agent
+
+LLM_BASE_URL=http://litellm-service.zeus-litellm-app.svc.cluster.local:4000
+
+LANGFUSE_HOST=https://insights-llm.zoomrx.ai
+
+GCS_PROJECT_ID=ferma-congress-zeus
+GCS_BUCKET_NAME=fc-zeus-entity-extraction-agent
+GOOGLE_APPLICATION_CREDENTIALS=/app/entity-extraction-agent/serviceaccount.json
+
+EMS_ENABLED=true
+EMS_PUBSUB_TOPIC=congress-entity-extraction-agent-logs
+
+SENTRY_ENABLED=true
+SENTRY_DSN=https://a2f1a1ed3c04f30e2f4fb49d84317093@insights-sentry.ferma.ai/50
+SENTRY_ENVIRONMENT=zeus
+
+INDICATION_LLM_MODEL=gemini-2.5-pro
+INDICATION_VALIDATION_LLM_MODEL=claude-sonnet-4-5-20250929
+
+DRUG_EXTRACTION_MODEL=gemini-2.5-pro
+DRUG_VALIDATION_MODEL=gemini-3-flash-preview
+
+DRUG_CLASS_REGIMEN_MODEL=gemini-3-pro-preview
+DRUG_CLASS_EXTRACTION_MODEL=gemini-3-pro-preview
+DRUG_CLASS_GROUNDED_MODEL=gemini-3-flash-preview
+DRUG_CLASS_SELECTION_MODEL=gemini-3-flash-preview
+DRUG_CLASS_EXPLICIT_MODEL=gemini-3-flash-preview
+DRUG_CLASS_CONSOLIDATION_MODEL=gemini-3-flash-preview
+DRUG_CLASS_VALIDATION_MODEL=gemini-3-flash-preview

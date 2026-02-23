@@ -1,0 +1,37 @@
+# Vault Path: app-configuration/ferma-congress/zeus/entity-extraction-agent-drug-worker/values.yaml
+# Key: values
+
+chart_version: 3.1.0
+kind: keda
+product: ferma-congress
+
+application_config:
+  name: entity-extraction-agent-drug-worker
+  type: backend
+
+  image:
+    name: entity-extraction-agent
+
+  resource:
+    preset: small  # 500m CPU / 1024Mi - LLM calls, 15 concurrent activities
+
+  entrypoint:
+    enabled: true
+    command: "python -m src.temporal.workers.drug_worker"
+
+  filebeat:
+    enabled: false
+
+  volume_mount: "/app/entity-extraction-agent"
+  nodepool: autopilot
+
+keda_config:
+  type: temporal
+  max_replicas: 4
+  pollingInterval: 30
+
+  temporal:
+    namespace: entity-extraction-agent
+    taskqueue: drug-activities
+    endpoint: zeus-temporal-server-service.zeus-temporal-app.svc.cluster.local:7233
+    queuesize: "1"
