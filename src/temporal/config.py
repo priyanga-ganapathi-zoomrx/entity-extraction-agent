@@ -184,7 +184,7 @@ class WorkerSettings:
     
     # Checkpoint worker - fast storage operations
     CHECKPOINT = {
-        "max_concurrent_activities": 50,  # I/O bound, can be high
+        "max_concurrent_activities": 30,  # I/O bound, can be high
     }
     
     # Drug activities - fast LLM calls
@@ -199,10 +199,10 @@ class WorkerSettings:
     
     # Indication extraction - fast LLM calls
     INDICATION_EXTRACTION = {
-        "max_concurrent_activities": 20,
+        "max_concurrent_activities": 15,
     }
     
     # Indication validation - slow (Sonnet 4.5)
     INDICATION_VALIDATION = {
-        "max_concurrent_activities": 5,
+        "max_concurrent_activities": 10,
     }
