@@ -89,7 +89,7 @@ class SearchResult(BaseModel):
 
 class IssueFound(BaseModel):
     """Issue found during validation."""
-    check_type: Literal["hallucination", "omission", "rule_compliance", "misclassification"] = Field(
+    check_type: Literal["hallucination", "omission", "rule_compliance", "misclassification", "synonym_association"] = Field(
         ..., description="Type of issue found"
     )
     severity: Literal["high", "medium", "low"] = Field(default="medium", description="Issue severity")
@@ -112,6 +112,7 @@ class ChecksPerformed(BaseModel):
     omission_detection: CheckResult = Field(..., description="Omission check result")
     rule_compliance: CheckResult = Field(..., description="Rule compliance check result")
     misclassification_detection: CheckResult = Field(..., description="Misclassification check result")
+    synonym_association_detection: CheckResult = Field(..., description="Synonym association check result")
 
 
 class ValidationResult(BaseModel):

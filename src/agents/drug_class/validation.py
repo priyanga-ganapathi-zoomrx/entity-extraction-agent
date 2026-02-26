@@ -1,10 +1,12 @@
 """Drug Class Validation Step.
 
 Validates drug class extractions against extraction rules.
-Performs three checks:
+Performs five checks:
 1. Hallucination Detection - Are extracted classes grounded in sources?
 2. Omission Detection - Are there valid classes that weren't extracted?
 3. Rule Compliance - Were extraction rules applied correctly?
+4. Title Extraction Compliance - Were title extraction and consolidation rules followed?
+5. Selection Rule Compliance - Were prioritization and specificity rules applied?
 
 This module exports a single function. Uses with_structured_output for reliable parsing.
 Includes per-request timeout (120s). Retries are handled by Temporal.
@@ -118,10 +120,12 @@ Please perform all 3 validation checks (Hallucination Detection, Omission Detect
 def validate_drug_class(input_data: ValidationInput, callbacks: list = None) -> ValidationOutput:
     """Validate a drug class extraction result.
     
-    Performs three validation checks:
+    Performs five validation checks:
     1. Hallucination Detection - verifies extracted classes are grounded
     2. Omission Detection - checks for missed valid classes
     3. Rule Compliance - verifies extraction rules were applied correctly
+    4. Title Extraction Compliance - verifies title extraction and consolidation rules were followed
+    5. Selection Rule Compliance - verifies prioritization and specificity rules were applied
     
     Uses with_structured_output for reliable parsing.
     

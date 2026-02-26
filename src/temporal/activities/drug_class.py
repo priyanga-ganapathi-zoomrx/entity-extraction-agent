@@ -700,10 +700,12 @@ def step5_consolidation(input_data: ConsolidationInput) -> dict:
 def validate_drug_class_activity(input_data: DrugClassValidationInput) -> dict:
     """Validate a drug class extraction result.
     
-    Performs three validation checks:
+    Performs five validation checks:
     1. Hallucination Detection - are extracted classes grounded in sources?
     2. Omission Detection - are there valid classes that weren't extracted?
     3. Rule Compliance - were extraction rules applied correctly?
+    4. Title Extraction Compliance - were title extraction and consolidation rules followed?
+    5. Selection Rule Compliance - were prioritization and specificity rules applied?
     
     Args:
         input_data: ValidationInput dataclass containing:

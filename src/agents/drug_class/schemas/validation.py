@@ -61,7 +61,7 @@ class CheckResult(BaseModel):
 
 
 class ChecksPerformed(BaseModel):
-    """Results of all three validation checks.
+    """Results of all five validation checks.
     
     Nested structure in LLM response.
     """
@@ -76,6 +76,14 @@ class ChecksPerformed(BaseModel):
     rule_compliance: CheckResult = Field(
         default_factory=CheckResult,
         description="Result of rule compliance check"
+    )
+    title_extraction_compliance: CheckResult = Field(
+        default_factory=CheckResult,
+        description="Result of title extraction and consolidation rules check"
+    )
+    selection_rule_compliance: CheckResult = Field(
+        default_factory=CheckResult,
+        description="Result of prioritization and specificity selection rules check"
     )
 
 
@@ -106,7 +114,7 @@ class ValidationLLMResponse(BaseModel):
     )
     checks_performed: ChecksPerformed = Field(
         default_factory=ChecksPerformed,
-        description="Results of the three validation checks"
+        description="Results of the five validation checks"
     )
     validation_reasoning: str = Field(
         default="", 

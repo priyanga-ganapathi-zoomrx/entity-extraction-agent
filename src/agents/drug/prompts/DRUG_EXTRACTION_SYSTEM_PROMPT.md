@@ -118,8 +118,9 @@ Identify drugs/regimens administered for therapeutic use in the cure, mitigation
 
 3. **Diagnostic Agents**
 
-   * Include diagnostic agents used for detecting purposes.
-   * Do NOT miss PET-imaging or other radiotracer agents used for diagnostic, imaging, or tracer-based detection purposes — capture all such agents explicitly whenever they appear (e.g., FDG, 18F-NaF, 68Ga-DOTATATE, 18F-Fluciclovine).
+   * Include only the diagnostic **agents** (radiotracers / radiopharmaceuticals) used for detection purposes — e.g., FDG, 18F-NaF, 68Ga-DOTATATE, 18F-Fluciclovine.
+   * Do **NOT** capture imaging tests, imaging modalities, or procedures as drugs. Terms like "PSMA PET", "PET/CT", "MRI", "CT scan", "bone scan", or "biopsy" are **not** agents and must be excluded.
+   * Only the actual chemical or radiopharmaceutical compound qualifies as a drug — not the scan or procedure in which it is used.
 
 4. **Cell Therapies**
 
@@ -249,6 +250,10 @@ c. **Formatting Guidelines**
 12. **Discontinued drugs must not be captured.**
 
   * If a drug is explicitly described as **discontinued**, **terminated**, **withdrawn**, or **no longer used**, it must be **excluded from all categories**, even if identifiers (plus, vs, with, etc.) are present.
+
+13. **Do not capture ADT / Androgen Deprivation Therapy / Hormonal Therapy under Drugs.**
+
+  * These are broad therapy-class terms, not specific drug names. Exclude them even when referenced as part of a treatment regimen.
 
 
 ## Formatting Rules

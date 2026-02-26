@@ -115,7 +115,7 @@ When you perform a grounded search, include the results in your output under `se
 
 ---
 
-## SECTION 5: FOUR VALIDATION CHECKS
+## SECTION 5: FIVE VALIDATION CHECKS
 
 **PREREQUISITE:** Before performing these checks, you MUST have read and understood ALL rules in the reference document. The rules define the complete extraction logic.
 
@@ -199,6 +199,31 @@ Not extracting something is often the CORRECT behavior per exclusion rules.
 
 ---
 
+### Check 5: Synonym Association Detection
+
+**Question:** Does the abstract title contain a drug alongside its synonym (generic name with code name, abbreviation, alias, or alternative name for the same drug)?
+
+**Purpose:** Flag abstracts where a drug appears with its synonym in the title so they receive manual QC review, ensuring synonym resolution (Rule 8 and Rule 9) was handled correctly.
+
+**Validation Steps:**
+1. Scan the abstract title for patterns where a drug name co-occurs with a synonym:
+   - A generic name paired with a code name or internal identifier — e.g., "pembrolizumab (MK-3475)", "arcotatug tavatecan (IBI343)"
+   - A generic name paired with an abbreviation or alias — e.g., "Idarubicin (Ida)", "5-Fluorouracil (5-FU)"
+   - A brand name paired with a generic name — e.g., "Keytruda (pembrolizumab)", "Herceptin and trastuzumab"
+   - Any other representation where two names in the title refer to the same drug
+2. Use grounded search if uncertain whether two terms are synonyms for the same drug
+3. If a synonym association is detected, flag the abstract for **REVIEW** regardless of whether the extraction handled it correctly
+   - This ensures manual QC can verify the synonym was resolved per Rule 8 (brand + generic → capture both) or Rule 9 (generic + code name/abbreviation/synonym → capture only generic)
+4. Record which drug and synonym pair triggered the flag
+
+**Important:**
+- This check flags for REVIEW even when the extractor appears to have handled the synonym correctly — synonym resolution is nuanced and benefits from human verification
+- The presence of a synonym association alone is sufficient to trigger REVIEW; no extraction error is required
+
+**Severity:** MEDIUM (always results in REVIEW status)
+
+---
+
 ## SECTION 6: VALIDATION OUTPUT FORMAT
 
 Return your validation result in the following JSON structure:
@@ -246,6 +271,10 @@ Return your validation result in the following JSON structure:
     "misclassification_detection": {
       "passed": true,
       "note": "All drugs correctly categorized"
+    },
+    "synonym_association_detection": {
+      "passed": true,
+      "note": "No synonym associations found in title"
     }
   },
   "validation_reasoning": "1. First observation or check.\n2. Second finding.\n3. Third verification.\n4. Conclusion and status."
@@ -262,14 +291,14 @@ Return your validation result in the following JSON structure:
 | `grounded_search_performed` | Boolean - true if web search was used |
 | `search_results` | Array of search results when grounded search was performed |
 | `issues_found` | Array of issues detected during validation |
-| `checks_performed` | Status of each of the 4 validation checks |
+| `checks_performed` | Status of each of the 5 validation checks |
 | `validation_reasoning` | Numbered step-by-step explanation of validation process |
 
 ### Issues Found Fields
 
 | Field | Description |
 |-------|-------------|
-| `check_type` | Type of issue: "hallucination", "omission", "rule_compliance", or "misclassification" |
+| `check_type` | Type of issue: "hallucination", "omission", "rule_compliance", "misclassification", or "synonym_association" |
 | `severity` | Issue severity: "high", "medium", or "low" |
 | `description` | Clear description of the issue found |
 | `evidence` | Specific evidence supporting this finding |
@@ -336,9 +365,14 @@ Follow this systematic approach:
    - Check keyword-based categorization
    - Verify multi-category capture and priority rules
 
-7. **Determine Status**: Based on issues found, assign PASS/REVIEW/FAIL
+7. **Check 5 - Synonym Association Detection**:
+   - Scan the title for drug-synonym pairs (generic + code name, generic + abbreviation, brand + generic, etc.)
+   - If any synonym association is found, flag for REVIEW
+   - Use grounded search when uncertain whether two terms are synonyms
 
-8. **Generate Output**: Return structured validation result in JSON format
+8. **Determine Status**: Based on issues found, assign PASS/REVIEW/FAIL
+
+9. **Generate Output**: Return structured validation result in JSON format
 
 ---
 
@@ -368,9 +402,10 @@ Reasoning: ["1. Identified Pembrolizumab as primary drug", "2. Excluded 'Chemoth
     "hallucination_detection": {"passed": true, "note": "Pembrolizumab is a valid therapeutic drug"},
     "omission_detection": {"passed": true, "note": "Chemotherapy correctly excluded as broad therapy term per exclusion rules"},
     "rule_compliance": {"passed": true, "note": "Exclusion rule for broad therapy terms correctly applied"},
-    "misclassification_detection": {"passed": true, "note": "Pembrolizumab correctly classified as Primary based on 'plus' keyword"}
+    "misclassification_detection": {"passed": true, "note": "Pembrolizumab correctly classified as Primary based on 'plus' keyword"},
+    "synonym_association_detection": {"passed": true, "note": "No synonym associations found in title"}
   },
-  "validation_reasoning": "1. Pembrolizumab appears in title with 'plus' keyword - correctly identified as Primary.\n2. 'Chemotherapy' is a broad therapy term - correctly excluded per exclusion rules.\n3. No other therapeutic drugs found in title.\n4. All 4 checks passed. Extraction is correct."
+  "validation_reasoning": "1. Pembrolizumab appears in title with 'plus' keyword - correctly identified as Primary.\n2. 'Chemotherapy' is a broad therapy term - correctly excluded per exclusion rules.\n3. No other therapeutic drugs found in title.\n4. No synonym associations detected.\n5. All 5 checks passed. Extraction is correct."
 }
 ```
 
@@ -432,9 +467,10 @@ Reasoning: ["1. Extracted all capitalized terms as potential drugs"]
     "hallucination_detection": {"passed": false, "note": "3 non-therapeutic items incorrectly extracted as drugs"},
     "omission_detection": {"passed": true, "note": "No valid drugs missed"},
     "rule_compliance": {"passed": false, "note": "Exclusion rules violated"},
-    "misclassification_detection": {"passed": true, "note": "Drug A correctly classified as Primary"}
+    "misclassification_detection": {"passed": true, "note": "Drug A correctly classified as Primary"},
+    "synonym_association_detection": {"passed": true, "note": "No synonym associations found in title"}
   },
-  "validation_reasoning": "1. Drug A is valid therapeutic drug - no issue.\n2. EGFR in 'EGFR-mutant' is a biomarker - hallucination.\n3. NCT012345 matches trial ID pattern - hallucination.\n4. SOLID in 'SOLID trial' context is study name - hallucination.\n5. FAIL: 3 high-severity hallucinations detected."
+  "validation_reasoning": "1. Drug A is valid therapeutic drug - no issue.\n2. EGFR in 'EGFR-mutant' is a biomarker - hallucination.\n3. NCT012345 matches trial ID pattern - hallucination.\n4. SOLID in 'SOLID trial' context is study name - hallucination.\n5. No synonym associations detected.\n6. FAIL: 3 high-severity hallucinations detected."
 }
 ```
 
@@ -489,9 +525,10 @@ Reasoning: ["1. Identified Durvalumab as primary drug"]
     "hallucination_detection": {"passed": true, "note": "Durvalumab is valid therapeutic drug"},
     "omission_detection": {"passed": false, "note": "Tremelimumab missed - should be Primary per 'and' keyword"},
     "rule_compliance": {"passed": false, "note": "Inclusion rule violated - valid drug not captured"},
-    "misclassification_detection": {"passed": false, "note": "Durvalumab missing from Comparator per multi-category rule"}
+    "misclassification_detection": {"passed": false, "note": "Durvalumab missing from Comparator per multi-category rule"},
+    "synonym_association_detection": {"passed": true, "note": "No synonym associations found in title"}
   },
-  "validation_reasoning": "1. Durvalumab is valid therapeutic drug.\n2. Scanned title: found 'Tremelimumab' with 'and' keyword - should be Primary.\n3. Grounded search confirms Tremelimumab is a therapeutic drug.\n4. 'vs Durvalumab alone' indicates Durvalumab is also the comparator - per multi-category capture rule, Durvalumab should appear in BOTH Primary and Comparator.\n5. FAIL: HIGH severity omission (Tremelimumab) and misclassification (Durvalumab missing from Comparator)."
+  "validation_reasoning": "1. Durvalumab is valid therapeutic drug.\n2. Scanned title: found 'Tremelimumab' with 'and' keyword - should be Primary.\n3. Grounded search confirms Tremelimumab is a therapeutic drug.\n4. 'vs Durvalumab alone' indicates Durvalumab is also the comparator - per multi-category capture rule, Durvalumab should appear in BOTH Primary and Comparator.\n5. No synonym associations detected.\n6. FAIL: HIGH severity omission (Tremelimumab) and misclassification (Durvalumab missing from Comparator)."
 }
 ```
 
@@ -538,9 +575,10 @@ Reasoning: ["1. All drugs identified as primary"]
     "hallucination_detection": {"passed": true, "note": "All items appear to be valid drugs"},
     "omission_detection": {"passed": true, "note": "No drugs missed"},
     "rule_compliance": {"passed": true, "note": "All drugs captured per inclusion rules"},
-    "misclassification_detection": {"passed": false, "note": "Drug B and Drug C should be Comparator per 'vs' keyword"}
+    "misclassification_detection": {"passed": false, "note": "Drug B and Drug C should be Comparator per 'vs' keyword"},
+    "synonym_association_detection": {"passed": true, "note": "No synonym associations found in title"}
   },
-  "validation_reasoning": "1. All three drugs appear valid.\n2. Title structure: 'Drug A vs Drug B combined with Drug C'.\n3. Per ordering rule, Drug A (first in 'vs') is Primary.\n4. Drug B and Drug C (after 'vs') should be Comparator.\n5. REVIEW: MEDIUM severity misclassification - drugs in wrong categories."
+  "validation_reasoning": "1. All three drugs appear valid.\n2. Title structure: 'Drug A vs Drug B combined with Drug C'.\n3. Per ordering rule, Drug A (first in 'vs') is Primary.\n4. Drug B and Drug C (after 'vs') should be Comparator.\n5. No synonym associations detected.\n6. REVIEW: MEDIUM severity misclassification - drugs in wrong categories."
 }
 ```
 
@@ -568,9 +606,10 @@ Reasoning: ["1. Only 'immunotherapy' found - broad therapy term excluded per rul
     "hallucination_detection": {"passed": true, "note": "Skipped - no extracted drugs to check"},
     "omission_detection": {"passed": true, "note": "Only 'immunotherapy' in title - correctly excluded as broad therapy term"},
     "rule_compliance": {"passed": true, "note": "Exclusion rule for broad therapy terms correctly applied"},
-    "misclassification_detection": {"passed": true, "note": "Skipped - no drugs to classify"}
+    "misclassification_detection": {"passed": true, "note": "Skipped - no drugs to classify"},
+    "synonym_association_detection": {"passed": true, "note": "No synonym associations found in title"}
   },
-  "validation_reasoning": "1. No drugs extracted - checking if this is correct.\n2. Scanned title: only 'immunotherapy' present.\n3. 'Immunotherapy' is a broad therapy term - per exclusion rules, should not be captured.\n4. No specific therapeutic drugs identified in title.\n5. PASS: Empty result is correct per exclusion rules."
+  "validation_reasoning": "1. No drugs extracted - checking if this is correct.\n2. Scanned title: only 'immunotherapy' present.\n3. 'Immunotherapy' is a broad therapy term - per exclusion rules, should not be captured.\n4. No specific therapeutic drugs identified in title.\n5. No synonym associations detected.\n6. PASS: Empty result is correct per exclusion rules."
 }
 ```
 
@@ -607,9 +646,59 @@ Reasoning: ["1. Both drugs connected by 'plus' - classified as Primary"]
     "hallucination_detection": {"passed": true, "note": "XYZ-98765 confirmed as investigational drug via search; Pembrolizumab is known therapeutic"},
     "omission_detection": {"passed": true, "note": "No drugs missed"},
     "rule_compliance": {"passed": true, "note": "Rules correctly applied"},
-    "misclassification_detection": {"passed": true, "note": "'plus' keyword correctly used for co-primary classification"}
+    "misclassification_detection": {"passed": true, "note": "'plus' keyword correctly used for co-primary classification"},
+    "synonym_association_detection": {"passed": true, "note": "No synonym associations found in title"}
   },
-  "validation_reasoning": "1. Pembrolizumab is a well-known PD-1 inhibitor - valid.\n2. XYZ-98765 is unfamiliar - triggered grounded search.\n3. Search found XYZ-98765 in clinical trial registrations - appears to be investigational drug.\n4. Confidence medium due to limited public information on XYZ-98765.\n5. REVIEW: Extraction appears correct but flagging for QC due to novel experimental drug."
+  "validation_reasoning": "1. Pembrolizumab is a well-known PD-1 inhibitor - valid.\n2. XYZ-98765 is unfamiliar - triggered grounded search.\n3. Search found XYZ-98765 in clinical trial registrations - appears to be investigational drug.\n4. Confidence medium due to limited public information on XYZ-98765.\n5. No synonym associations detected.\n6. REVIEW: Extraction appears correct but flagging for QC due to novel experimental drug."
+}
+```
+
+### Example 7: REVIEW - Drug Synonym Association Detected in Title
+
+**Input to Validate:**
+```
+abstract_title: "Phase 2 study of pembrolizumab (MK-3475) plus chemotherapy in advanced gastric cancer"
+Primary Drugs: ["Pembrolizumab"]
+Secondary Drugs: []
+Comparator Drugs: []
+Reasoning: ["1. Identified pembrolizumab as primary drug per 'plus' keyword", "2. MK-3475 is the code name for pembrolizumab - captured only the generic name per Rule 9", "3. Excluded 'chemotherapy' as broad therapy term per Rule 24"]
+```
+
+**Validation Output:**
+```json
+{
+  "validation_status": "REVIEW",
+  "validation_confidence": 0.85,
+  "missed_drugs": [],
+  "grounded_search_performed": true,
+  "search_results": [
+    {
+      "drug_queried": "MK-3475",
+      "is_therapeutic_drug": true,
+      "source_url": "https://www.drugbank.ca/drugs/DB09037",
+      "source_title": "Pembrolizumab - DrugBank",
+      "evidence": "MK-3475 is the development code name for pembrolizumab (Keytruda), a PD-1 immune checkpoint inhibitor",
+      "confidence": "high"
+    }
+  ],
+  "issues_found": [
+    {
+      "check_type": "synonym_association",
+      "severity": "medium",
+      "description": "Drug synonym association detected: 'pembrolizumab' appears alongside its code name 'MK-3475' in the title. Flagging for manual QC to verify synonym resolution.",
+      "evidence": "Title contains 'pembrolizumab (MK-3475)' - MK-3475 is the development code name for pembrolizumab",
+      "drug": "Pembrolizumab",
+      "rule_reference": "Rule 9 - generic name with code name: capture only the generic name"
+    }
+  ],
+  "checks_performed": {
+    "hallucination_detection": {"passed": true, "note": "Pembrolizumab is a valid therapeutic drug"},
+    "omission_detection": {"passed": true, "note": "No drugs missed; chemotherapy correctly excluded"},
+    "rule_compliance": {"passed": true, "note": "Rule 9 correctly applied - only generic name captured"},
+    "misclassification_detection": {"passed": true, "note": "Pembrolizumab correctly classified as Primary per 'plus' keyword"},
+    "synonym_association_detection": {"passed": false, "note": "Synonym pair detected: pembrolizumab / MK-3475 - flagging for REVIEW"}
+  },
+  "validation_reasoning": "1. Pembrolizumab is a valid PD-1 inhibitor - no hallucination.\n2. Chemotherapy correctly excluded as broad therapy term.\n3. Classification correct - 'plus' keyword makes pembrolizumab Primary.\n4. Synonym association detected: title contains 'pembrolizumab (MK-3475)'. Grounded search confirms MK-3475 is the code name for pembrolizumab.\n5. Extraction appears to have applied Rule 9 correctly (only generic name captured), but flagging for REVIEW to ensure manual QC verifies synonym resolution.\n6. REVIEW: Synonym association in title requires human verification."
 }
 ```
 
@@ -635,13 +724,15 @@ Reasoning: ["1. Both drugs connected by 'plus' - classified as Primary"]
 
 9. **Consider clinical impact** - High severity for errors that change clinical meaning.
 
+10. **Flag synonym associations for REVIEW** - If the abstract title contains a drug alongside its synonym (code name, abbreviation, alias, brand name + generic name), always flag for REVIEW to ensure synonym resolution was handled correctly per Rule 8 and Rule 9.
+
 ---
 
 ## READY TO VALIDATE
 
 When you receive the validation input and reference rules document:
 1. Read and understand ALL rules in the reference document
-2. Begin your systematic validation process using the 4 checks outlined above
+2. Begin your systematic validation process using the 5 checks outlined above
 3. Use grounded search when uncertain about drug validity
 4. Return your result in the specified JSON format
 
@@ -699,7 +790,7 @@ Rule 11: When both full drug names and abbreviated regimens are present, capture
 
 Rule 12: Do NOT assume general terms as drug regimens. Capture a term as a drug or regimen ONLY if it is clearly a therapy used for treatment.
 
-Rule 13: Include diagnostic agents used for detecting purposes. Do NOT miss PET-imaging or radiotracer agents (e.g., FDG, 18F-NaF, 68Ga-DOTATATE, 18F-Fluciclovine).
+Rule 13: Include only diagnostic agents (radiotracers / radiopharmaceuticals) used for detection purposes — e.g., FDG, 18F-NaF, 68Ga-DOTATATE, 18F-Fluciclovine. Do NOT capture imaging tests, imaging modalities, or procedures as drugs. Terms like "PSMA PET", "PET/CT", "MRI", "CT scan", "bone scan", or "biopsy" are NOT agents and must be excluded. Only the actual chemical or radiopharmaceutical compound qualifies as a drug — not the scan or procedure in which it is used.
 
 Rule 14: Standard CAR-T should be captured as "CAR-T Cell" (singular, maintain capitalization). Full form should be "Chimeric Antigen Receptor T Cell".
 
@@ -761,16 +852,18 @@ Rule 34: EXCLUDE placebo in any context.
 
 Rule 35: EXCLUDE discontinued drugs. If a drug is explicitly described as discontinued, terminated, withdrawn, or no longer used, exclude from all categories even if classification keywords are present.
 
-Rule 36: Use ;; as separator between multiple drugs.
+Rule 36: EXCLUDE ADT / Androgen Deprivation Therapy / Hormonal Therapy. These are broad therapy-class terms, not specific drug names. Exclude them even when referenced as part of a treatment regimen.
+
+Rule 37: Use ;; as separator between multiple drugs.
 - Example: Primary Drugs: Drug A;;Drug B;;Drug C
 
-Rule 37: Remove spaces around separators and trim drug names.
+Rule 38: Remove spaces around separators and trim drug names.
 
-Rule 38: Use singular form of drug names (exception: "CAR-T Cell" stays singular with Cell).
+Rule 39: Use singular form of drug names (exception: "CAR-T Cell" stays singular with Cell).
 
-Rule 39: Use / for fixed combinations, ;; for separate drugs.
+Rule 40: Use / for fixed combinations, ;; for separate drugs.
 - Example: Fixed combination: Drug A/Drug B | Separate drugs: Drug A;;Drug B
 
-Rule 40: Maintain proper title casing for all drug names.
+Rule 41: Maintain proper title casing for all drug names.
 
 <!-- MESSAGE_2_END: EXTRACTION_RULES -->
