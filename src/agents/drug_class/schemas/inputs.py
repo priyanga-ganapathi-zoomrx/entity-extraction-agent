@@ -96,7 +96,8 @@ class ConsolidationInput:
 class ValidationInput:
     """Input for drug class validation.
     
-    Contains the original extraction inputs and the result to validate.
+    Contains the original extraction inputs and the result to validate,
+    plus outputs from steps 3-5 for selection/title/consolidation checks.
     """
     abstract_id: str
     drug_name: str
@@ -104,4 +105,7 @@ class ValidationInput:
     full_abstract: str
     search_results: list[dict]  # [{url, content}, ...]
     extraction_result: dict  # {drug_classes, selected_sources, reasoning, extraction_details}
+    drug_selections: list[dict] = field(default_factory=list)  # Step 3: [{drug_name, selected_classes, reasoning}, ...]
+    explicit_drug_classes: dict = field(default_factory=dict)  # Step 4: {drug_classes, reasoning}
+    refined_explicit_drug_classes: dict = field(default_factory=dict)  # Step 5: {drug_classes, removed_classes, reasoning}
 

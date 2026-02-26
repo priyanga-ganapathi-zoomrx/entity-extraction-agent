@@ -87,6 +87,31 @@ def _format_validation_input(input_data: ValidationInput) -> str:
     extraction_details = extraction_result.get("extraction_details", [])
     extraction_details_str = json.dumps(extraction_details, indent=2, ensure_ascii=False) if extraction_details else "[]"
     
+    # Format drug selections (Step 3)
+    drug_selections_str = ""
+    if input_data.drug_selections:
+        drug_selections_str = f"""
+### Drug Class Selection Result to Validate
+- **drug_selections**:
+{json.dumps(input_data.drug_selections, indent=2, ensure_ascii=False)}
+"""
+
+    # Format refined explicit drug classes (Step 5) and consolidation context (Step 4)
+    refined_explicit_str = ""
+    consolidation_context_str = ""
+    if input_data.refined_explicit_drug_classes:
+        refined_explicit_str = f"""
+### Refined Explicit Drug Classes to Validate
+- **refined_explicit_drug_classes**:
+{json.dumps(input_data.refined_explicit_drug_classes, indent=2, ensure_ascii=False)}
+"""
+    if input_data.explicit_drug_classes:
+        consolidation_context_str = f"""
+### Consolidation Context
+- **explicit_drug_classes**:
+{json.dumps(input_data.explicit_drug_classes, indent=2, ensure_ascii=False)}
+"""
+
     input_content = f"""## Validation Input
 
 ### Drug Information
@@ -110,8 +135,8 @@ def _format_validation_input(input_data: ValidationInput) -> str:
 - **reasoning**: {extraction_result.get("reasoning", "")}
 - **extraction_details**: 
 {extraction_details_str}
-
-Please perform all 3 validation checks (Hallucination Detection, Omission Detection, Rule Compliance) and return your validation result in the specified JSON format."""
+{drug_selections_str}{refined_explicit_str}{consolidation_context_str}
+Please perform all 4 validation checks (Omission Detection, Rule Compliance, Title Extraction & Consolidation Compliance, Selection Rule Compliance) and return your validation result in the specified JSON format."""
     
     return input_content
 

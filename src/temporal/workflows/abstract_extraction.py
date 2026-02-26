@@ -529,6 +529,7 @@ class AbstractExtractionWorkflow:
 
         # ---- Step 5: Consolidation ----
         explicit = self._output.drug_class.explicit_classes
+        step5_output = None
         if explicit and explicit != ["NA"]:
             step5 = await self._run_with_checkpoint(
                 input, "drug_class_step5", step5_consolidation,
@@ -542,6 +543,7 @@ class AbstractExtractionWorkflow:
             )
             self._status.drug_class.step5_consolidation = step5.to_step_status()
             if step5.status == "success":
+                step5_output = step5.output
                 self._output.drug_class.refined_explicit_classes = (
                     step5.output.get("refined_explicit_classes", explicit)
                 )
@@ -556,7 +558,11 @@ class AbstractExtractionWorkflow:
 
         # ---- Step 6: Validation (per component) ----
         validation_data = await self._run_drug_class_validation(
-            input, all_extraction_results
+            input,
+            all_extraction_results,
+            drug_selections=all_drug_selections,
+            step4_output=step4.output if step4.status == "success" else None,
+            step5_output=step5_output,
         )
         val_token_usage, val_llm_calls = self._extract_token_metadata(validation_data)
         self._output.drug_class.validation_results = validation_data.get("results", [])
@@ -740,10 +746,15 @@ class AbstractExtractionWorkflow:
         self,
         input: AbstractExtractionInput,
         extraction_results: dict[str, dict],
+        drug_selections: list[dict] | None = None,
+        step4_output: dict | None = None,
+        step5_output: dict | None = None,
     ) -> dict:
         """Run validation for each drug component.
         
         Loads search results from cache for each component (no API calls).
+        Passes step 3/4/5 outputs so the validator can check selection,
+        title-extraction, and consolidation compliance.
         """
         existing = await self._load_checkpoint(input, "drug_class_validation")
         if existing is not None:
@@ -751,6 +762,21 @@ class AbstractExtractionWorkflow:
                 f"Loaded drug class validation from checkpoint for {input.abstract_id}"
             )
             return existing
+
+        explicit_drug_classes = {}
+        if step4_output:
+            explicit_drug_classes = {
+                "drug_classes": step4_output.get("explicit_drug_classes", []),
+                "reasoning": step4_output.get("reasoning", ""),
+            }
+
+        refined_explicit_drug_classes = {}
+        if step5_output:
+            refined_explicit_drug_classes = {
+                "drug_classes": step5_output.get("refined_explicit_classes", []),
+                "removed_classes": step5_output.get("removed_classes", []),
+                "reasoning": step5_output.get("reasoning", ""),
+            }
 
         results = []
         errors = []
@@ -780,6 +806,9 @@ class AbstractExtractionWorkflow:
                         full_abstract=input.full_abstract,
                         search_results=search_result.get("drug_class_results", []),
                         extraction_result=extraction_result,
+                        drug_selections=drug_selections or [],
+                        explicit_drug_classes=explicit_drug_classes,
+                        refined_explicit_drug_classes=refined_explicit_drug_classes,
                     ),
                     task_queue=TaskQueues.DRUG_CLASS,
                     start_to_close_timeout=Timeouts.FAST_LLM,
