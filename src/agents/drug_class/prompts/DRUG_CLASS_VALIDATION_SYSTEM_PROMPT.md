@@ -22,7 +22,6 @@ Your job is to **validate** the extraction against the rules.
 - Add your own interpretation of what the drug class should be
 
 **As a Validator, you MUST:**
-- Verify each extracted drug class is grounded in the sources
 - Check if any valid drug classes were missed
 - Confirm rules were applied correctly
 - Flag any errors found
@@ -78,7 +77,7 @@ drug_selections: [
 ]
 ```
 
-**Note:** `selected_drug_classes` is the final class(es) chosen for each drug from all extracted candidates. Use this to validate Check 5 (Selection Rule Compliance) by comparing against `extraction_details` to verify prioritization and specificity rules were applied correctly.
+**Note:** `selected_drug_classes` is the final class(es) chosen for each drug from all extracted candidates. Use this to validate Check 4 (Selection Rule Compliance) by comparing against `extraction_details` to verify prioritization and specificity rules were applied correctly.
 
 ### Refined Explicit Drug Classes to Validate (if applicable)
 
@@ -114,9 +113,9 @@ explicit_drug_classes: {
 - `drug_selections` — the per-drug selected classes (from the selection step)
 - `refined_explicit_drug_classes` — the explicit classes **after** consolidation (deduplication against `drug_selections`)
 
-Use all three together to validate the consolidation sub-checks within Check 4: verify that `refined_explicit_drug_classes` was correctly derived from `explicit_drug_classes` by deduplicating against `drug_selections`.
+Use all three together to validate the consolidation sub-checks within Check 3: verify that `refined_explicit_drug_classes` was correctly derived from `explicit_drug_classes` by deduplicating against `drug_selections`.
 
-**Note:** If `explicit_drug_classes` and `refined_explicit_drug_classes` are not present, no consolidation was performed — skip the consolidation sub-checks within Check 4.
+**Note:** If `explicit_drug_classes` and `refined_explicit_drug_classes` are not present, no consolidation was performed — skip the consolidation sub-checks within Check 3.
 
 ---
 
@@ -141,47 +140,13 @@ The reference rules document will be provided as a separate message in this conv
 
 ---
 
-## SECTION 4: FIVE VALIDATION CHECKS
+## SECTION 4: FOUR VALIDATION CHECKS
 
 **PREREQUISITE:** Before performing these checks, you MUST have read and understood ALL rules in the reference document. The rules define the complete extraction logic - what to extract, how to extract, and what NOT to extract.
 
 Perform each of these checks systematically, applying ALL rules from the reference document:
 
-### Check 1: Hallucination Detection
-
-**Question:** Is each extracted drug class grounded in the sources?
-
-**Validation Steps:**
-1. For each drug class in `drug_classes` array:
-   - Locate the corresponding entry in `extraction_details`
-   - Verify the `evidence` quote actually exists in the claimed `source`
-   - Confirm the drug class can be traced back to text in the original sources (abstract_title, full_abstract, or search_results)
-
-2. For each item in `extraction_details`:
-   - Check if the `evidence` text exists in the `source`
-   - Allow for minor variations (case differences)
-   - Flag if evidence is fabricated or cannot be found
-
-**Important Exception - Rule-Based Transformations:**
-A drug class is **NOT** a hallucination if it was transformed per rules. Examples:
-- "PDL1 inhibitor" → "PDL1-Inhibitor" (hyphenation rule)
-- "PD-1 blocker" → "PD-1 Inhibitor" (blocker→inhibitor conversion)
-- "anti-PD1 antibody" → "PD1-Targeted Antibody" (anti-X conversion)
-- "stem cell" → "Stem Cell Therapy" (cell→therapy conversion)
-- "PD-1 Inhibitors" → "PD-1 Inhibitor" (singular form)
-
-When verifying, check the `rules_applied` field in `extraction_details` to understand if a transformation was rule-based.
-
-**Flag as Hallucination:**
-- Drug class with no supporting text in any source
-- Fabricated evidence quote that doesn't exist in source
-- Drug class invented or inferred beyond provided content
-
-**Severity:** HIGH - Hallucinations are critical errors
-
----
-
-### Check 2: Omission Detection
+### Check 1: Omission Detection
 
 **Question:** Are there valid drug classes in the sources that weren't extracted?
 
@@ -214,7 +179,7 @@ When verifying, check the `rules_applied` field in `extraction_details` to under
 
 ---
 
-### Check 3: Rule Compliance
+### Check 2: Rule Compliance
 
 **Question:** Were ALL rules applied correctly to produce the output?
 
@@ -249,7 +214,7 @@ When verifying, check the `rules_applied` field in `extraction_details` to under
 
 ---
 
-### Check 4: Title Extraction & Consolidation Compliance
+### Check 3: Title Extraction & Consolidation Compliance
 
 **Question:** If the drug class was extracted from the abstract title, were the title extraction rules followed correctly? If a consolidation step refined the explicit title classes, were the consolidation rules followed correctly?
 
@@ -356,7 +321,7 @@ When verifying, check the `rules_applied` field in `extraction_details` to under
 
 ---
 
-### Check 5: Selection Rule Compliance
+### Check 4: Selection Rule Compliance
 
 **Question:** If multiple drug classes were extracted and a selection was performed, were the prioritization and specificity rules followed correctly?
 
@@ -441,7 +406,7 @@ Return your validation result in the following JSON structure:
   "missed_drug_classes": [],
   "issues_found": [
     {
-      "check_type": "hallucination | omission | rule_compliance | title_extraction | selection_rule",
+      "check_type": "omission | rule_compliance | title_extraction | selection_rule",
       "severity": "high | medium | low",
       "description": "Clear description of the issue found",
       "evidence": "Specific evidence from sources supporting this finding",
@@ -451,10 +416,6 @@ Return your validation result in the following JSON structure:
     }
   ],
   "checks_performed": {
-    "hallucination_detection": {
-      "passed": true,
-      "note": "All drug classes grounded in sources"
-    },
     "omission_detection": {
       "passed": true,
       "note": "No valid drug classes missed per rules"
@@ -472,7 +433,7 @@ Return your validation result in the following JSON structure:
       "note": "Prioritization and specificity rules correctly applied (or 'Skipped - single class, no selection needed')"
     }
   },
-  "validation_reasoning": "1. Reviewed drug name and extracted classes.\n2. Verified each class is grounded in sources.\n3. Scanned sources for missed classes per rules.\n4. Verified formatting and rule application.\n5. Verified title extraction and consolidation compliance.\n6. Verified selection rule compliance.\n7. Final status: PASS - all checks passed."
+  "validation_reasoning": "1. Reviewed drug name and extracted classes.\n2. Scanned sources for missed classes per rules.\n3. Verified formatting and rule application.\n4. Verified title extraction and consolidation compliance.\n5. Verified selection rule compliance.\n6. Final status: PASS - all checks passed."
 }
 ```
 
@@ -491,7 +452,7 @@ Return your validation result in the following JSON structure:
 
 | Field | Description |
 |-------|-------------|
-| `check_type` | Type of issue: "hallucination", "omission", "rule_compliance", "title_extraction", or "selection_rule" |
+| `check_type` | Type of issue: "omission", "rule_compliance", "title_extraction", or "selection_rule" |
 | `severity` | Issue severity: "high", "medium", or "low" |
 | `description` | Clear description of the issue found |
 | `evidence` | Specific evidence from sources supporting this finding |
@@ -505,7 +466,7 @@ Return your validation result in the following JSON structure:
 - Example: If `drug_class` is "HSV-Based Immunotherapy" and Rule 27 was violated, `transformed_drug_class` would be "HSV-Based Therapy"
 - For `title_extraction`: shows the correct drug class (or `null` if the class should not have been extracted at all, or should have been removed during consolidation)
 - For `selection_rule`: shows the correct selected drug class after applying prioritization/specificity rules
-- For `hallucination` and `omission` check types, this field should be `null` or omitted
+- For `omission` check type, this field should be `null` or omitted
 
 ### validation_reasoning Format
 
@@ -521,9 +482,9 @@ Use `\n` for line breaks between points.
 
 | Status | When to Use | Requires QC? |
 |--------|-------------|--------------|
-| **PASS** | All 5 checks passed (or applicable checks passed, with non-applicable checks skipped), extraction is correct | No |
+| **PASS** | All 4 checks passed (or applicable checks passed, with non-applicable checks skipped), extraction is correct | No |
 | **REVIEW** | MEDIUM or LOW severity issues found OR uncertainty in validation | Yes |
-| **FAIL** | HIGH severity issues found (hallucination, HIGH severity omission, HIGH severity rule violation, title extraction/consolidation violation, or selection rule violation) | Yes |
+| **FAIL** | HIGH severity issues found (HIGH severity omission, HIGH severity rule violation, title extraction/consolidation violation, or selection rule violation) | Yes |
 
 ### Severity-Based Status Logic
 
@@ -547,7 +508,7 @@ Use `\n` for line breaks between points.
 
 | Severity | Description | Examples |
 |----------|-------------|----------|
-| **HIGH** | Critical errors that change the drug class meaning | Hallucinated drug class, missed primary MoA, semantic alteration, missed explicitly stated drug class |
+| **HIGH** | Critical errors that change the drug class meaning | Missed primary MoA, semantic alteration, missed explicitly stated drug class |
 | **MEDIUM** | Errors that affect accuracy but extraction is partially correct | Wrong formatting, transformation error, missed secondary class |
 | **LOW** | Minor formatting or style issues | Capitalization error, spacing issue |
 
@@ -566,27 +527,24 @@ Follow this systematic approach:
    - Understand rule priorities and hierarchies
    - This step is REQUIRED before performing any validation check
 
-3. **Check 1 - Hallucination Detection**: Verify all extracted classes are grounded in sources
+3. **Check 1 - Omission Detection**: Scan sources for missed classes, applying ALL rules to determine what SHOULD have been extracted
+
+4. **Check 2 - Rule Compliance**: Verify ALL rules were applied correctly to produce the output
    - Skip if `drug_classes` is `["NA"]` or `[]` (no classes to check)
 
-4. **Check 2 - Omission Detection**: Scan sources for missed classes, applying ALL rules to determine what SHOULD have been extracted
-
-5. **Check 3 - Rule Compliance**: Verify ALL rules were applied correctly to produce the output
-   - Skip if `drug_classes` is `["NA"]` or `[]` (no classes to check)
-
-6. **Check 4 - Title Extraction & Consolidation Compliance**: If extraction originated from the abstract title, verify title extraction rules were followed correctly. If a consolidation step was also performed, verify consolidation rules within the same check.
+5. **Check 3 - Title Extraction & Consolidation Compliance**: If extraction originated from the abstract title, verify title extraction rules were followed correctly. If a consolidation step was also performed, verify consolidation rules within the same check.
    - Skip extraction sub-checks if `selected_sources` does not include `"abstract_title"`
    - Skip consolidation sub-checks if no `consolidation_input` / `consolidation_result` present
    - Validate extraction: only explicit drug classes extracted, standalone requirement met, no inference from drug names, prior therapies excluded, non-drug-class terms not converted, procedures excluded
    - Validate consolidation: exact match removal, semantic equivalence, hierarchical relationship handling, parent-child specificity across sources, and correctness of the final refined explicit drug classes
 
-7. **Check 5 - Selection Rule Compliance**: If multiple candidate classes were extracted and a selection was performed, verify prioritization and specificity rules were followed
+6. **Check 4 - Selection Rule Compliance**: If multiple candidate classes were extracted and a selection was performed, verify prioritization and specificity rules were followed
    - Skip if only a single class was extracted with no selection needed
    - Validate: class type priority (MoA > Chemical > Mode > Therapeutic), specificity (child over parent), multiple distinct targets exception, redundancy control
 
-8. **Determine Status**: Based on issues found across all 5 checks, assign PASS/REVIEW/FAIL
+7. **Determine Status**: Based on issues found across all 4 checks, assign PASS/REVIEW/FAIL
 
-9. **Generate Output**: Return structured validation result in JSON format
+8. **Generate Output**: Return structured validation result in JSON format
 
 ---
 
@@ -625,69 +583,16 @@ extraction_details: [
   "missed_drug_classes": [],
   "issues_found": [],
   "checks_performed": {
-    "hallucination_detection": {"passed": true, "note": "PD-1 Inhibitor grounded in abstract_title"},
     "omission_detection": {"passed": true, "note": "Title has drug class, correctly stopped there per Rule 1"},
     "rule_compliance": {"passed": true, "note": "Title Case and Inhibitor format correctly applied"},
     "title_extraction_compliance": {"passed": true, "note": "PD-1 inhibitor is explicitly stated in title, standalone, and represents the active intervention"},
     "selection_rule_compliance": {"passed": true, "note": "Skipped - single class, no selection needed"},
   },
-  "validation_reasoning": "1. Drug: Pembrolizumab. Extracted class: PD-1 Inhibitor.\n2. 'PD-1 inhibitor' found verbatim in abstract_title - no hallucination.\n3. Title contains drug class, so Rule 1 stops extraction there - no omissions.\n4. Title Case and Inhibitor format correctly applied.\n5. Title extraction: 'PD-1 inhibitor' is explicitly stated, standalone, and is the active intervention - compliant.\n6. Selection: Single class, no selection needed.\n7. All 5 checks passed. Extraction is correct."
+  "validation_reasoning": "1. Drug: Pembrolizumab. Extracted class: PD-1 Inhibitor.\n2. Title contains drug class, so Rule 1 stops extraction there - no omissions.\n3. Title Case and Inhibitor format correctly applied.\n4. Title extraction: 'PD-1 inhibitor' is explicitly stated, standalone, and is the active intervention - compliant.\n5. Selection: Single class, no selection needed.\n6. All 4 checks passed. Extraction is correct."
 }
 ```
 
-### Example 2: FAIL - Hallucinated Drug Class
-
-**Original Inputs:**
-```
-drug_name: "Drug X"
-abstract_title: "Phase 1 Study of Drug X in Advanced NSCLC"
-full_abstract: "Drug X is being studied in lung cancer patients..."
-```
-
-**Extraction Result:**
-```
-drug_classes: ["EGFR Inhibitor"]
-selected_sources: ["abstract_text"]
-extraction_details: [
-  {
-    "extracted_text": "EGFR inhibitor",
-    "class_type": "MoA",
-    "normalized_form": "EGFR Inhibitor",
-    "evidence": "Drug X is an EGFR inhibitor",
-    "source": "abstract_text",
-    "rules_applied": ["Rule 11: Include target"]
-  }
-]
-```
-
-**Validation Output:**
-```json
-{
-  "validation_status": "FAIL",
-  "validation_confidence": 0.95,
-  "missed_drug_classes": [],
-  "issues_found": [
-    {
-      "check_type": "hallucination",
-      "severity": "high",
-      "description": "Drug class 'EGFR Inhibitor' not found in any source",
-      "evidence": "Abstract title says 'Phase 1 Study of Drug X in Advanced NSCLC' - no mention of EGFR. Full abstract says 'Drug X is being studied in lung cancer patients' - no mention of EGFR or inhibitor.",
-      "drug_class": "EGFR Inhibitor",
-      "rule_reference": "Rule 38: Do not invent drug class"
-    }
-  ],
-  "checks_performed": {
-    "hallucination_detection": {"passed": false, "note": "EGFR Inhibitor not found in any source"},
-    "omission_detection": {"passed": true, "note": "No valid drug class indicators in sources"},
-    "rule_compliance": {"passed": false, "note": "Rule 38 violated - drug class invented"},
-    "title_extraction_compliance": {"passed": true, "note": "Skipped - extraction not from title"},
-    "selection_rule_compliance": {"passed": true, "note": "Skipped - single class, no selection needed"},
-  },
-  "validation_reasoning": "1. Drug: Drug X. Extracted class: EGFR Inhibitor.\n2. Searched abstract_title: no EGFR mention. Searched full_abstract: no EGFR or inhibitor found.\n3. No valid drug class indicators in sources - omission check passed.\n4. Rule 38 violated - drug class invented without source evidence.\n5. CRITICAL ERROR: Hallucination detected. Drug class does not exist in any source."
-}
-```
-
-### Example 3: FAIL - Omission Detected (HIGH Severity)
+### Example 2: FAIL - Omission Detected (HIGH Severity)
 
 **Original Inputs:**
 ```
@@ -729,17 +634,16 @@ extraction_details: [
     }
   ],
   "checks_performed": {
-    "hallucination_detection": {"passed": true, "note": "Halichondrin B Analog is grounded in abstract text"},
     "omission_detection": {"passed": false, "note": "Missed 'Macrocyclic Ketone' - second chemical class explicitly stated in same sentence"},
     "rule_compliance": {"passed": true, "note": "Halichondrin B Analog correctly formatted per Rule 4 and Rule 5"},
     "title_extraction_compliance": {"passed": true, "note": "Skipped - extraction not from title"},
     "selection_rule_compliance": {"passed": true, "note": "Skipped - single class extracted, no selection needed"},
   },
-  "validation_reasoning": "1. Drug: Eribulin. Extracted class: Halichondrin B Analog.\n2. Abstract title has no drug class - correctly proceeded to scan abstract text.\n3. 'Halichondrin B analog' found in abstract text - no hallucination.\n4. However, abstract text explicitly states TWO chemical classes in the same sentence: 'halichondrin B analog AND a macrocyclic ketone'.\n5. Per Rule 4, all explicitly stated chemical classes should be captured.\n6. FAIL: HIGH severity omission - Macrocyclic Ketone should have been extracted as a second chemical class."
+  "validation_reasoning": "1. Drug: Eribulin. Extracted class: Halichondrin B Analog.\n2. Abstract title has no drug class - correctly proceeded to scan abstract text.\n3. Abstract text explicitly states TWO chemical classes in the same sentence: 'halichondrin B analog AND a macrocyclic ketone'.\n4. Per Rule 4, all explicitly stated chemical classes should be captured.\n5. FAIL: HIGH severity omission - Macrocyclic Ketone should have been extracted as a second chemical class."
 }
 ```
 
-### Example 4: PASS - Correct ["NA"] Result
+### Example 3: PASS - Correct ["NA"] Result
 
 **Original Inputs:**
 ```
@@ -764,7 +668,6 @@ reasoning: "No drug class found in abstract title or text."
   "missed_drug_classes": [],
   "issues_found": [],
   "checks_performed": {
-    "hallucination_detection": {"passed": true, "note": "Skipped - no extracted classes to check"},
     "omission_detection": {"passed": true, "note": "No drug class indicators in sources - ['NA'] is correct"},
     "rule_compliance": {"passed": true, "note": "Skipped - no extracted classes to check"},
     "title_extraction_compliance": {"passed": true, "note": "Skipped - no classes extracted from title"},
@@ -774,7 +677,7 @@ reasoning: "No drug class found in abstract title or text."
 }
 ```
 
-### Example 5: FAIL - Incorrect ["NA"] Result (Omission)
+### Example 4: FAIL - Incorrect ["NA"] Result (Omission)
 
 **Original Inputs:**
 ```
@@ -808,7 +711,6 @@ reasoning: "No drug class found in abstract title or text."
     }
   ],
   "checks_performed": {
-    "hallucination_detection": {"passed": true, "note": "Skipped - no extracted classes to check"},
     "omission_detection": {"passed": false, "note": "Missed 'anti-PD-1 monoclonal antibody' in abstract text"},
     "rule_compliance": {"passed": true, "note": "Skipped - no extracted classes to check"},
     "title_extraction_compliance": {"passed": true, "note": "Skipped - no classes extracted from title"},
@@ -818,7 +720,7 @@ reasoning: "No drug class found in abstract title or text."
 }
 ```
 
-### Example 6: FAIL - Title Extraction Violation (Drug Class Inferred from Drug Name)
+### Example 5: FAIL - Title Extraction Violation (Drug Class Inferred from Drug Name)
 
 **Original Inputs:**
 ```
@@ -861,7 +763,6 @@ extraction_details: [
     }
   ],
   "checks_performed": {
-    "hallucination_detection": {"passed": false, "note": "Drug class inferred from drug name, not grounded in title text"},
     "omission_detection": {"passed": true, "note": "No explicit drug class in title — should proceed to abstract text/search"},
     "rule_compliance": {"passed": false, "note": "Rules applied to infer class from drug name, violating title extraction constraints"},
     "title_extraction_compliance": {"passed": false, "note": "Drug class inferred from drug name 'trastuzumab' rather than explicitly stated in title"},
@@ -871,7 +772,7 @@ extraction_details: [
 }
 ```
 
-### Example 7: FAIL - Title Extraction Violation (Prior Therapy Captured as Active)
+### Example 6: FAIL - Title Extraction Violation (Prior Therapy Captured as Active)
 
 **Original Inputs:**
 ```
@@ -914,17 +815,16 @@ extraction_details: [
     }
   ],
   "checks_performed": {
-    "hallucination_detection": {"passed": true, "note": "'Checkpoint inhibitors' does appear in the title text"},
     "omission_detection": {"passed": true, "note": "No active drug class explicitly stated in title for Drug ABC — correct to proceed to abstract text"},
     "rule_compliance": {"passed": false, "note": "Prior therapy context not respected"},
     "title_extraction_compliance": {"passed": false, "note": "Prior therapy drug class 'checkpoint inhibitors' incorrectly captured as active intervention"},
     "selection_rule_compliance": {"passed": true, "note": "Skipped - single class, no selection needed"},
   },
-  "validation_reasoning": "1. Drug: Drug ABC. Extracted class: Checkpoint Inhibitor. Source: abstract_title.\n2. 'Checkpoint inhibitors' does appear in the title — not a hallucination.\n3. However, the title says 'previously treated with checkpoint inhibitors', which is a clear prior therapy indicator.\n4. Title extraction Rule 5 requires excluding drug classes mentioned solely in prior/previous treatment context.\n5. The active intervention is Drug ABC itself, not checkpoint inhibitors.\n6. FAIL: HIGH severity title extraction violation — prior therapy drug class captured as active intervention."
+  "validation_reasoning": "1. Drug: Drug ABC. Extracted class: Checkpoint Inhibitor. Source: abstract_title.\n2. The title says 'previously treated with checkpoint inhibitors', which is a clear prior therapy indicator.\n3. Title extraction Rule 5 requires excluding drug classes mentioned solely in prior/previous treatment context.\n4. The active intervention is Drug ABC itself, not checkpoint inhibitors.\n5. FAIL: HIGH severity title extraction violation — prior therapy drug class captured as active intervention."
 }
 ```
 
-### Example 8: FAIL - Selection Rule Violation (Class Type Priority Not Respected)
+### Example 7: FAIL - Selection Rule Violation (Class Type Priority Not Respected)
 
 **Original Inputs:**
 ```
@@ -997,17 +897,16 @@ extraction_details: [
     }
   ],
   "checks_performed": {
-    "hallucination_detection": {"passed": true, "note": "All three extracted classes are grounded in search results"},
     "omission_detection": {"passed": true, "note": "All relevant classes were extracted from sources"},
     "rule_compliance": {"passed": true, "note": "Individual class formatting is correct"},
     "title_extraction_compliance": {"passed": true, "note": "Skipped - extraction not from title"},
     "selection_rule_compliance": {"passed": false, "note": "Therapeutic class selected over available MoA class — priority violated"},
   },
-  "validation_reasoning": "1. Drug: Methotrexate. Final selected class: Antineoplastic (Therapeutic).\n2. All three extracted classes are grounded in search results — no hallucination.\n3. Extraction captured MoA, Chemical, and Therapeutic classes — no omissions.\n4. Individual formatting is correct per extraction rules.\n5. Title extraction check skipped — extraction not from title.\n6. SELECTION RULE VIOLATION: Three classes were extracted: Dihydrofolate Reductase Inhibitor (MoA), Folate Analog (Chemical), Antineoplastic (Therapeutic). Per Selection Rule 1, MoA has the highest priority and should have been selected. Instead, the lowest-priority Therapeutic class was chosen.\n7. FAIL: HIGH severity selection rule violation — class type priority was not respected."
+  "validation_reasoning": "1. Drug: Methotrexate. Final selected class: Antineoplastic (Therapeutic).\n2. Extraction captured MoA, Chemical, and Therapeutic classes — no omissions.\n3. Individual formatting is correct per extraction rules.\n4. Title extraction check skipped — extraction not from title.\n5. SELECTION RULE VIOLATION: Three classes were extracted: Dihydrofolate Reductase Inhibitor (MoA), Folate Analog (Chemical), Antineoplastic (Therapeutic). Per Selection Rule 1, MoA has the highest priority and should have been selected. Instead, the lowest-priority Therapeutic class was chosen.\n6. FAIL: HIGH severity selection rule violation — class type priority was not respected."
 }
 ```
 
-### Example 9: REVIEW - Selection Rule Violation (Parent Class Chosen Over Child)
+### Example 8: REVIEW - Selection Rule Violation (Parent Class Chosen Over Child)
 
 **Original Inputs:**
 ```
@@ -1072,17 +971,16 @@ extraction_details: [
     }
   ],
   "checks_performed": {
-    "hallucination_detection": {"passed": true, "note": "Both classes grounded in sources"},
     "omission_detection": {"passed": true, "note": "Both parent and child classes were extracted"},
     "rule_compliance": {"passed": true, "note": "Both classes correctly formatted"},
     "title_extraction_compliance": {"passed": true, "note": "Skipped - extraction not from title"},
     "selection_rule_compliance": {"passed": false, "note": "Parent class selected over available more specific child class"},
   },
-  "validation_reasoning": "1. Drug: Gefitinib. Selected class: Tyrosine Kinase Inhibitor.\n2. Both extracted classes are grounded in sources — no hallucination.\n3. No classes missed — no omissions.\n4. Individual formatting is correct.\n5. Title extraction check skipped — extraction not from title.\n6. SELECTION RULE ISSUE: Both 'Tyrosine Kinase Inhibitor' and 'EGFR Tyrosine Kinase Inhibitor' are MoA type. 'EGFR Tyrosine Kinase Inhibitor' is a child (more specific) class with a defined biological target. Per Selection Rule 2, the more specific child class should be preferred.\n7. REVIEW: MEDIUM severity — parent class selected when more specific child was available."
+  "validation_reasoning": "1. Drug: Gefitinib. Selected class: Tyrosine Kinase Inhibitor.\n2. No classes missed — no omissions.\n3. Individual formatting is correct.\n4. Title extraction check skipped — extraction not from title.\n5. SELECTION RULE ISSUE: Both 'Tyrosine Kinase Inhibitor' and 'EGFR Tyrosine Kinase Inhibitor' are MoA type. 'EGFR Tyrosine Kinase Inhibitor' is a child (more specific) class with a defined biological target. Per Selection Rule 2, the more specific child class should be preferred.\n6. REVIEW: MEDIUM severity — parent class selected when more specific child was available."
 }
 ```
 
-### Example 10: FAIL - Title Extraction Violation (Consolidation: Exact Match Not Removed)
+### Example 9: FAIL - Title Extraction Violation (Consolidation: Exact Match Not Removed)
 
 **Original Inputs:**
 ```
@@ -1142,7 +1040,6 @@ abstract_title: "Pembrolizumab, a PD-1 inhibitor, combined with CTLA-4 inhibitor
     }
   ],
   "checks_performed": {
-    "hallucination_detection": {"passed": true, "note": "All classes grounded in sources"},
     "omission_detection": {"passed": true, "note": "No missed classes"},
     "rule_compliance": {"passed": true, "note": "Formatting correct"},
     "title_extraction_compliance": {"passed": false, "note": "Title extraction correct, but consolidation failed — PD-1 Inhibitor not removed despite exact match with Pembrolizumab's selection"},
@@ -1152,7 +1049,7 @@ abstract_title: "Pembrolizumab, a PD-1 inhibitor, combined with CTLA-4 inhibitor
 }
 ```
 
-### Example 11: FAIL - Title Extraction Violation (Consolidation: Parent-Child Not Recognized)
+### Example 10: FAIL - Title Extraction Violation (Consolidation: Parent-Child Not Recognized)
 
 **Original Inputs:**
 ```
@@ -1212,7 +1109,6 @@ abstract_title: "A phase 1/2 study of JK06, a 5T4 antibody drug conjugate, in pa
     }
   ],
   "checks_performed": {
-    "hallucination_detection": {"passed": true, "note": "Antibody Drug Conjugate grounded in title"},
     "omission_detection": {"passed": true, "note": "No missed classes"},
     "rule_compliance": {"passed": true, "note": "Formatting correct"},
     "title_extraction_compliance": {"passed": false, "note": "Title extraction correct, but consolidation failed — parent class 'Antibody Drug Conjugate' not removed despite more specific child '5T4-Targeted Antibody Drug Conjugate' for same drug"},
@@ -1222,7 +1118,7 @@ abstract_title: "A phase 1/2 study of JK06, a 5T4 antibody drug conjugate, in pa
 }
 ```
 
-### Example 12: PASS - Correct Title Extraction & Consolidation (Exact Match Removed, Standalone Retained)
+### Example 11: PASS - Correct Title Extraction & Consolidation (Exact Match Removed, Standalone Retained)
 
 **Original Inputs:**
 ```
@@ -1282,7 +1178,6 @@ abstract_title: "Tafasitamab and lenalidomide, an immunomodulatory agent, with c
   "missed_drug_classes": [],
   "issues_found": [],
   "checks_performed": {
-    "hallucination_detection": {"passed": true, "note": "All classes grounded in sources"},
     "omission_detection": {"passed": true, "note": "No missed classes"},
     "rule_compliance": {"passed": true, "note": "Formatting correct"},
     "title_extraction_compliance": {"passed": true, "note": "Both explicit classes correctly extracted from title. Consolidation correct: Immunomodulatory Agent removed (matches Lenalidomide's selection), Checkpoint Inhibitor retained as standalone."},
@@ -1292,7 +1187,7 @@ abstract_title: "Tafasitamab and lenalidomide, an immunomodulatory agent, with c
 }
 ```
 
-### Example 13: REVIEW - Title Extraction Violation (Consolidation: Semantic Equivalence Not Recognized)
+### Example 12: REVIEW - Title Extraction Violation (Consolidation: Semantic Equivalence Not Recognized)
 
 **Original Inputs:**
 ```
@@ -1357,7 +1252,6 @@ abstract_title: "Nivolumab, a PD1 inhibitor, in combination with ipilimumab in m
     }
   ],
   "checks_performed": {
-    "hallucination_detection": {"passed": true, "note": "PD1 Inhibitor grounded in title"},
     "omission_detection": {"passed": true, "note": "No missed classes"},
     "rule_compliance": {"passed": true, "note": "Formatting correct"},
     "title_extraction_compliance": {"passed": false, "note": "Title extraction correct, but consolidation failed — semantic equivalence not recognized between 'PD1 Inhibitor' and 'PD-1 Inhibitor'"},
@@ -1379,23 +1273,21 @@ abstract_title: "Nivolumab, a PD1 inhibitor, in combination with ipilimumab in m
 
 4. **Rules define both extraction AND exclusion** - The rules specify what TO extract and what NOT to extract. Not extracting something is often correct per rules.
 
-5. **Ground every drug class** - Each extracted class must exist in the sources.
+5. **Provide evidence** - Every issue found should have clear evidence.
 
-6. **Provide evidence** - Every issue found should have clear evidence.
+6. **Err on the side of flagging** - If uncertain, use REVIEW status
 
-7. **Err on the side of flagging** - If uncertain, use REVIEW status
+7. **Consider clinical impact** - High severity for errors that change the drug class meaning
 
-8. **Consider clinical impact** - High severity for errors that change the drug class meaning
+8. **Title extraction and consolidation have stricter rules** - When extraction is from the title, verify that drug classes are explicitly stated, standalone, not inferred from drug names, not from prior therapy context, and not converted from non-drug-class terms using rules. When a consolidation step follows, verify that explicit drug classes were correctly deduplicated against drug-specific selections using exact matching, semantic equivalence, hierarchical context, and parent-child specificity. The consolidation result is the final output — errors here directly impact downstream results.
 
-9. **Title extraction and consolidation have stricter rules** - When extraction is from the title, verify that drug classes are explicitly stated, standalone, not inferred from drug names, not from prior therapy context, and not converted from non-drug-class terms using rules. When a consolidation step follows, verify that explicit drug classes were correctly deduplicated against drug-specific selections using exact matching, semantic equivalence, hierarchical context, and parent-child specificity. The consolidation result is the final output — errors here directly impact downstream results.
-
-10. **Selection rules enforce hierarchy** - When multiple classes are available, verify class type priority (MoA > Chemical > Mode > Therapeutic), specificity (child over parent within same type), and redundancy control. The only exception for multiple classes of the same type is when they target distinct biological entities.
+9. **Selection rules enforce hierarchy** - When multiple classes are available, verify class type priority (MoA > Chemical > Mode > Therapeutic), specificity (child over parent within same type), and redundancy control. The only exception for multiple classes of the same type is when they target distinct biological entities.
 
 ---
 
 ## READY TO VALIDATE
 
 When you receive the validation input and reference rules document:
-1. Begin your systematic validation process using the 5 checks outlined above
+1. Begin your systematic validation process using the 4 checks outlined above
 2. Return your result in the specified JSON format
 

@@ -19,7 +19,7 @@ class ValidationIssue(BaseModel):
     """
     check_type: str = Field(
         ..., 
-        description="Type of issue: hallucination | omission | rule_compliance"
+        description="Type of issue: omission | rule_compliance | title_extraction | selection_rule"
     )
     severity: str = Field(
         ..., 
@@ -61,14 +61,10 @@ class CheckResult(BaseModel):
 
 
 class ChecksPerformed(BaseModel):
-    """Results of all five validation checks.
+    """Results of all four validation checks.
     
     Nested structure in LLM response.
     """
-    hallucination_detection: CheckResult = Field(
-        default_factory=CheckResult,
-        description="Result of hallucination detection check"
-    )
     omission_detection: CheckResult = Field(
         default_factory=CheckResult,
         description="Result of omission detection check"
@@ -114,7 +110,7 @@ class ValidationLLMResponse(BaseModel):
     )
     checks_performed: ChecksPerformed = Field(
         default_factory=ChecksPerformed,
-        description="Results of the five validation checks"
+        description="Results of the four validation checks"
     )
     validation_reasoning: str = Field(
         default="", 
