@@ -109,6 +109,7 @@ class ChecksPerformed(BaseModel):
     rule_application: Optional[CheckPerformed] = None
     exclusion_compliance: Optional[CheckPerformed] = None
     formatting_compliance: Optional[CheckPerformed] = None
+    abbreviation_check: Optional[CheckPerformed] = None
 
 
 class ValidationLLMResponse(BaseModel):
