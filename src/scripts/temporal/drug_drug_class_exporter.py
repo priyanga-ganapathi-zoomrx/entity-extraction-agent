@@ -92,6 +92,11 @@ NEW_COLUMNS = [
     # Combined drug classes (step 3 + step 5)
     "drug_class_combined_all_classes",
     # Drug class validation
+    "drug_class_validation_overall_status",
+    "drug_class_validation_status",
+    "drug_class_validation_reasoning",
+    "drug_class_validation_checks_performed",
+    "drug_class_validation_issues_found",
     "drug_class_validation_missed_drug_classes",
 ]
 
@@ -356,7 +361,8 @@ def transform_drug_class_validation(validation_data: dict) -> dict:
     """Transform drug_class_validation.json to CSV columns.
 
     Temporal validation output has a 'results' array with per-drug validation.
-    Each entry has drug_name and validation.missed_drug_classes.
+    Each entry has drug_name and validation details including status, reasoning,
+    checks_performed, issues_found, and missed_drug_classes.
 
     Args:
         validation_data: Parsed drug_class_validation.json
@@ -365,18 +371,53 @@ def transform_drug_class_validation(validation_data: dict) -> dict:
         Dict with validation column values
     """
     if not validation_data:
-        return {"drug_class_validation_missed_drug_classes": ""}
+        return {
+            "drug_class_validation_overall_status": "",
+            "drug_class_validation_status": "",
+            "drug_class_validation_reasoning": "",
+            "drug_class_validation_checks_performed": "",
+            "drug_class_validation_issues_found": "",
+            "drug_class_validation_missed_drug_classes": "",
+        }
 
     results = validation_data.get("results", [])
 
+    validation_status = {}
+    validation_reasoning = {}
+    checks_performed = {}
+    issues_found = {}
     missed_drug_classes = {}
+
     for entry in results:
         drug_name = entry.get("drug_name", "")
         validation = entry.get("validation", {})
         if drug_name and isinstance(validation, dict):
+            validation_status[drug_name] = validation.get("validation_status", "")
+            validation_reasoning[drug_name] = validation.get("validation_reasoning", "")
+            checks_performed[drug_name] = validation.get("checks_performed", {})
+            issues_found[drug_name] = validation.get("issues_found", [])
             missed_drug_classes[drug_name] = validation.get("missed_drug_classes", [])
 
+    # Determine overall status: FAIL if ANY drug fails, PASS if all pass
+    overall_status = ""
+    if validation_status:
+        statuses = list(validation_status.values())
+        if any(s == "FAIL" for s in statuses):
+            overall_status = "FAIL"
+        elif all(s == "PASS" for s in statuses):
+            overall_status = "PASS"
+        else:
+            # Handle edge cases (empty strings, other values)
+            overall_status = "FAIL" if "FAIL" in statuses else "UNKNOWN"
+
     return {
+        "drug_class_validation_overall_status": overall_status,
+        "drug_class_validation_status": format_dict_as_key_value_skip_empty(
+            validation_status
+        ),
+        "drug_class_validation_reasoning": to_json_string(validation_reasoning),
+        "drug_class_validation_checks_performed": to_json_string(checks_performed),
+        "drug_class_validation_issues_found": to_json_string(issues_found),
         "drug_class_validation_missed_drug_classes": format_dict_as_key_value_skip_empty(
             missed_drug_classes
         ),
