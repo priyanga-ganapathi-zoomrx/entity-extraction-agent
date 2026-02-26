@@ -268,13 +268,14 @@ def validate_indication(
     """Validate an indication extraction result against rules.
     
     Uses a LangGraph agent with tool calling for rules retrieval.
-    The agent performs 6 validation checks:
+    The agent performs 7 validation checks:
     1. Source selection - Was the correct source used?
     2. Hallucination check - Was anything added that's not in the source?
     3. Omission check - Was anything relevant omitted?
     4. Rule application - Were extraction rules followed correctly?
     5. Exclusion compliance - Were exclusion rules respected?
     6. Formatting compliance - Is the output formatted correctly?
+    7. Abbreviation check - Does the indication use full names instead of abbreviations?
     
     Args:
         input_data: IndicationInput dataclass containing:
@@ -292,7 +293,7 @@ def validate_indication(
         dict: Serialized ValidationLLMResponse containing:
             - validation_status: PASS, REVIEW, or FAIL
             - issues_found: List of issues with severity and evidence
-            - checks_performed: Results of all 6 validation checks
+            - checks_performed: Results of all 7 validation checks
             - validation_reasoning: Step-by-step validation explanation
     
     Raises:

@@ -137,5 +137,5 @@ class ValidationLLMResponse(BaseModel):
     )
     checks_performed: Optional[ChecksPerformed] = Field(
         default=None,
-        description="Results of all 6 validation checks"
+        description="Results of all 7 validation checks"
     )

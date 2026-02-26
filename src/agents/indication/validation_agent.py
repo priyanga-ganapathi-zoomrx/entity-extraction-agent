@@ -175,7 +175,7 @@ IMPORTANT:
 - **rules_retrieved**: {json.dumps(extraction_result.get('rules_retrieved', []), indent=2)}
 - **components_identified**: {json.dumps(extraction_result.get('components_identified', []), indent=2)}
 
-Please perform all 6 validation checks and return your validation result in the specified JSON format.{empty_notice}"""
+Please perform all 7 validation checks and return your validation result in the specified JSON format.{empty_notice}"""
 
     def invoke(
         self,
