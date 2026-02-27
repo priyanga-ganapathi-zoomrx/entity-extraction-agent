@@ -41,6 +41,9 @@ from src.agents.drug_class import (
     ValidationOutput,
     DrugClassInput,
     Step2Output,
+    Step3Output,
+    Step4Output,
+    Step5Output,
     config,
 )
 from src.agents.core.storage import LocalStorageClient, GCSStorageClient, get_storage_client
@@ -308,7 +311,27 @@ def process_single(inp: DrugClassInput, storage: Union[LocalStorageClient, GCSSt
             error="Step 2 output not found",
             duration_seconds=duration,
         )
-    
+
+    # Load step3, step4, step5 outputs if available (for full validation checks)
+    step3_output: Step3Output | None = None
+    step4_output: Step4Output | None = None
+    step5_output: Step5Output | None = None
+    try:
+        step3_data = storage.download_json(f"abstracts/{abstract_id}/step3_output.json")
+        step3_output = Step3Output(**step3_data)
+    except FileNotFoundError:
+        pass
+    try:
+        step4_data = storage.download_json(f"abstracts/{abstract_id}/step4_output.json")
+        step4_output = Step4Output(**step4_data)
+    except FileNotFoundError:
+        pass
+    try:
+        step5_data = storage.download_json(f"abstracts/{abstract_id}/step5_output.json")
+        step5_output = Step5Output(**step5_data)
+    except FileNotFoundError:
+        pass
+
     # Validate each drug extraction
     for drug_name, extraction_result in step2_output.extractions.items():
         drug_result = {
@@ -342,7 +365,36 @@ def process_single(inp: DrugClassInput, storage: Union[LocalStorageClient, GCSSt
                 search_results = cache.get("drug_class_search", {}).get("results", [])
             except FileNotFoundError:
                 pass  # No cache available
-            
+
+            # Build drug_selections from step3 output (same for all drugs in this abstract)
+            drug_selections = []
+            if step3_output:
+                drug_selections = [
+                    {
+                        "drug_name": s.drug_name,
+                        "selected_drug_classes": s.selected_drug_classes,
+                        "reasoning": s.reasoning,
+                    }
+                    for s in step3_output.get_results_list()
+                ]
+
+            # Build explicit_drug_classes from step4 output (title explicit classes)
+            explicit_drug_classes: dict = {}
+            if step4_output:
+                explicit_drug_classes = {
+                    "drug_classes": step4_output.explicit_drug_classes,
+                    "reasoning": step4_output.reasoning,
+                }
+
+            # Build refined_explicit_drug_classes from step5 output (post-consolidation)
+            refined_explicit_drug_classes: dict = {}
+            if step5_output:
+                refined_explicit_drug_classes = {
+                    "drug_classes": step5_output.refined_explicit_classes,
+                    "removed_classes": step5_output.removed_classes,
+                    "reasoning": step5_output.reasoning,
+                }
+
             validation_input = ValidationInput(
                 abstract_id=abstract_id,
                 drug_name=drug_name,
@@ -350,6 +402,9 @@ def process_single(inp: DrugClassInput, storage: Union[LocalStorageClient, GCSSt
                 full_abstract=inp.full_abstract or "",
                 search_results=search_results,
                 extraction_result=extraction_dict,
+                drug_selections=drug_selections,
+                explicit_drug_classes=explicit_drug_classes,
+                refined_explicit_drug_classes=refined_explicit_drug_classes,
             )
             
             result: ValidationOutput = validate_drug_class(validation_input)
@@ -569,12 +624,12 @@ def main():
     print()
     print("Saving batch status...")
     batch_status = save_batch_status(storage, inputs, batch_duration, batch_started_at)
-    print(f"✓ Saved validation_batch_status.json")
+    print("✓ Saved validation_batch_status.json")
     
     # Save CSV output
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     csv_output_filename = f"validation_{timestamp}.csv"
-    print(f"Saving CSV output...")
+    print("Saving CSV output...")
     save_results_csv(inputs, original_rows, fieldnames, storage, csv_output_filename)
     print(f"✓ Saved {csv_output_filename}")
     

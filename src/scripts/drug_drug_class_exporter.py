@@ -10,7 +10,7 @@ Output: Single CSV with one row per abstract containing:
 - Drug extraction columns (primary, secondary, comparator drugs, reasoning)
 - Drug validation columns (status, search results, missed drugs, etc.)
 - Drug class step 1-5 columns (drug_to_components, drug_classes, selections, etc.)
-- Drug class validation columns (missed_drug_classes)
+- Drug class validation columns (overall status, per-drug status, reasoning, checks_performed, issues_found, missed_drug_classes)
 
 Usage:
     # Local storage
@@ -472,41 +472,97 @@ def transform_drug_class_validation(
 ) -> tuple[dict, bool]:
     """Transform drug class validation output to CSV columns.
     
-    Reads per-drug validation files: validation_{sanitized_drug}.json
+    Reads per-drug validation files: validation_{sanitized_drug}.json and
+    aggregates them into the same CSV structure used by the Temporal exporter.
     
     Output columns:
+    - drug_class_validation_overall_status
+    - drug_class_validation_status (Type C: key-value format, skip empty)
+    - drug_class_validation_reasoning (JSON)
+    - drug_class_validation_checks_performed (JSON)
+    - drug_class_validation_issues_found (JSON)
     - drug_class_validation_missed_drug_classes (Type C: key-value format, skip empty)
     
     Returns:
         tuple: (column_dict, validation_files_found)
     """
+    # If we don't know which drugs were extracted, we can't look up per-drug validation
     if not step2_data:
-        return {"drug_class_validation_missed_drug_classes": ""}, False
+        empty = {
+            "drug_class_validation_overall_status": "",
+            "drug_class_validation_status": "",
+            "drug_class_validation_reasoning": "",
+            "drug_class_validation_checks_performed": "",
+            "drug_class_validation_issues_found": "",
+            "drug_class_validation_missed_drug_classes": "",
+        }
+        return empty, False
     
     # Get drug names from step2 extractions
     extractions = step2_data.get("extractions", {})
     drug_names = list(extractions.keys())
     
     if not drug_names:
-        return {"drug_class_validation_missed_drug_classes": ""}, False
+        empty = {
+            "drug_class_validation_overall_status": "",
+            "drug_class_validation_status": "",
+            "drug_class_validation_reasoning": "",
+            "drug_class_validation_checks_performed": "",
+            "drug_class_validation_issues_found": "",
+            "drug_class_validation_missed_drug_classes": "",
+        }
+        return empty, False
     
-    missed_drug_classes = {}
+    validation_status: dict[str, str] = {}
+    validation_reasoning: dict[str, str] = {}
+    checks_performed: dict[str, dict] = {}
+    issues_found: dict[str, list] = {}
+    missed_drug_classes: dict[str, list] = {}
     validation_files_found = False
     
-    # Read each per-drug validation file
+    # Read each per-drug validation file and aggregate fields
     for drug_name in drug_names:
         safe_drug_name = _sanitize_filename(drug_name)
         val_data = read_json_file(
             drug_class_storage,
-            f"abstracts/{abstract_id}/validation_{safe_drug_name}.json"
+            f"abstracts/{abstract_id}/validation_{safe_drug_name}.json",
         )
-        if val_data:
-            validation_files_found = True
-            missed_drug_classes[drug_name] = val_data.get("missed_drug_classes", [])
+        if not val_data:
+            continue
+        
+        validation_files_found = True
+        validation_status[drug_name] = val_data.get("validation_status", "")
+        validation_reasoning[drug_name] = val_data.get("validation_reasoning", "")
+        checks_performed[drug_name] = val_data.get("checks_performed", {})
+        issues_found[drug_name] = val_data.get("issues_found", [])
+        missed_drug_classes[drug_name] = val_data.get("missed_drug_classes", [])
     
-    return {
-        "drug_class_validation_missed_drug_classes": _format_dict_as_key_value_skip_empty(missed_drug_classes),
-    }, validation_files_found
+    # Determine overall status: FAIL if ANY drug fails, PASS if all pass
+    overall_status = ""
+    if validation_status:
+        statuses = list(validation_status.values())
+        if any(s == "FAIL" for s in statuses):
+            overall_status = "FAIL"
+        elif all(s == "PASS" for s in statuses):
+            overall_status = "PASS"
+        else:
+            # Handle edge cases (empty strings, other values)
+            overall_status = "FAIL" if "FAIL" in statuses else "UNKNOWN"
+    
+    columns = {
+        "drug_class_validation_overall_status": overall_status,
+        "drug_class_validation_status": _format_dict_as_key_value_skip_empty(
+            validation_status
+        ),
+        "drug_class_validation_reasoning": _to_json_string(validation_reasoning),
+        "drug_class_validation_checks_performed": _to_json_string(checks_performed),
+        "drug_class_validation_issues_found": _to_json_string(issues_found),
+        "drug_class_validation_missed_drug_classes": _format_dict_as_key_value_skip_empty(
+            missed_drug_classes
+        ),
+    }
+    
+    return columns, validation_files_found
 
 
 # =============================================================================
@@ -662,7 +718,12 @@ def get_output_fieldnames(input_fieldnames: list[str]) -> list[str]:
         "drug_class_step5_reasoning",
         # Combined drug classes (step 3 + step 5)
         "drug_class_combined_all_classes",
-        # Drug class validation
+        # Drug class validation (match Temporal exporter)
+        "drug_class_validation_overall_status",
+        "drug_class_validation_status",
+        "drug_class_validation_reasoning",
+        "drug_class_validation_checks_performed",
+        "drug_class_validation_issues_found",
         "drug_class_validation_missed_drug_classes",
     ]
     
