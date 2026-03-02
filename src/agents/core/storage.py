@@ -22,6 +22,10 @@ from typing import Protocol, Union
 from google.cloud import storage as gcs_storage
 from google.cloud.exceptions import NotFound
 
+from src.agents.core.ems_logger import get_logger
+
+ems_logger = get_logger("storage")
+
 
 class StorageClient(Protocol):
     """Protocol for storage operations (GCS or local filesystem)."""
@@ -122,8 +126,13 @@ class GCSStorageClient:
                 try:
                     with open(creds_path) as f:
                         project_id = json.load(f).get("project_id")
-                except Exception:
-                    pass
+                except Exception as e:
+                    ems_logger.error(
+                        "gcs_credentials_read_failed",
+                        creds_path=creds_path,
+                        error=str(e),
+                        exc_info=True,
+                    )
         
         # Initialize client
         self.client = gcs_storage.Client(project=project_id) if project_id else gcs_storage.Client()

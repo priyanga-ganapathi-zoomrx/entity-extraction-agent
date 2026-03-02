@@ -18,9 +18,12 @@ from datetime import datetime, timezone
 from tenacity import retry, stop_after_attempt, retry_if_exception_type, wait_fixed
 
 from src.agents.core import settings
+from src.agents.core.ems_logger import get_logger
 from src.agents.core.storage import StorageClient
 from src.agents.drug_class.config import config
 from src.agents.drug_class.schemas import DrugSearchCache
+
+ems_logger = get_logger("drug_class_step2_search")
 
 
 # =============================================================================
@@ -63,6 +66,7 @@ def load_search_cache(drug: str, storage: StorageClient) -> DrugSearchCache | No
     try:
         if storage.exists(cache_path):
             data = storage.download_json(cache_path)
+            ems_logger.info("cache_loaded", drug=drug, cache_path=cache_path)
             return DrugSearchCache(**data)
     except Exception as e:
         print(f"    ⚠ Could not load cache for {drug}: {e}")
@@ -80,8 +84,15 @@ def save_search_cache(drug: str, cache: DrugSearchCache, storage: StorageClient)
     cache_path = _get_cache_path(drug)
     try:
         storage.upload_json(cache_path, cache.model_dump())
+        ems_logger.info("cache_saved", drug=drug, cache_path=cache_path)
     except Exception as e:
-        print(f"    ⚠ Could not save cache for {drug}: {e}")
+        ems_logger.error(
+            "cache_save_failed",
+            drug=drug,
+            cache_path=cache_path,
+            error=str(e),
+            exc_info=True,
+        )
 
 
 # =============================================================================
@@ -111,7 +122,7 @@ def search_drug_class(drug: str) -> list[dict]:
         
         api_key = settings.tavily.TAVILY_API_KEY
         if not api_key:
-            print(f"    ⚠ Tavily API key not configured")
+            ems_logger.error("tavily_api_key_missing", drug=drug)
             return []
         
         client = TavilyClient(api_key=api_key)
@@ -143,12 +154,17 @@ def search_drug_class(drug: str) -> list[dict]:
         
         print(f"    ✓ Found {len(results)} drug class results")
         return results
-        
+
     except ImportError:
-        print("    ⚠ tavily-python not installed")
+        ems_logger.error("tavily_not_installed", drug=drug)
         return []
     except Exception as e:
-        print(f"    ⚠ Tavily drug class search error: {e}")
+        ems_logger.error(
+            "tavily_drug_class_search_failed",
+            drug=drug,
+            error=str(e),
+            exc_info=True,
+        )
         return []
 
 
@@ -210,11 +226,17 @@ def search_drug_firm(drug: str, firms: list[str]) -> list[dict]:
         
         print(f"    ✓ Found {len(results)} firm search results")
         return results
-        
+
     except ImportError:
+        ems_logger.error("tavily_not_installed", drug=drug)
         return []
     except Exception as e:
-        print(f"    ⚠ Tavily firm search error: {e}")
+        ems_logger.error(
+            "tavily_firm_search_failed",
+            drug=drug,
+            error=str(e),
+            exc_info=True,
+        )
         return []
 
 
@@ -265,7 +287,7 @@ def fetch_search_results(
         }
         cache_updated = True
     else:
-        print(f"    ⏭ Using cached drug class results for {drug}")
+        ems_logger.info("cache_hit_drug_class", drug=drug)
     
     # Check if firm search is cached (for this specific firms combination)
     firm_search_results = []
@@ -282,7 +304,7 @@ def fetch_search_results(
             }
             cache_updated = True
         else:
-            print(f"    ⏭ Using cached firm search results for {drug}")
+            ems_logger.info("cache_hit_firm_search", drug=drug)
     
     # Save cache if updated
     if cache_updated:

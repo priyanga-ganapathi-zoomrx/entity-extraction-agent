@@ -81,7 +81,7 @@ class Timeouts:
     """Timeout configurations by activity type."""
     
     # Storage/checkpoint activities (typically <1s)
-    STORAGE = timedelta(seconds=30)
+    STORAGE = timedelta(minutes=1)
     
     # Fast LLM activities - Gemini (typically 5-15s, preview models can spike to 90s+)
     FAST_LLM = timedelta(minutes=4)
@@ -93,10 +93,10 @@ class Timeouts:
     SEARCH = timedelta(seconds=45)
     
     # Workflow execution timeout (entire abstract processing)
-    WORKFLOW_EXECUTION = timedelta(minutes=30)
+    WORKFLOW_EXECUTION = timedelta(minutes=60)
     
     # Workflow run timeout (single run before continue-as-new)
-    WORKFLOW_RUN = timedelta(minutes=30)
+    WORKFLOW_RUN = timedelta(minutes=60)
 
 
 # =============================================================================
