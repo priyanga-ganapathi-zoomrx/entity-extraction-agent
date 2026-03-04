@@ -7,8 +7,6 @@ They are imported by the workflow via `workflow.unsafe.imports_passed_through()`
 from dataclasses import dataclass, field
 from typing import Optional
 
-from src.temporal.schemas.status import StepStatus
-
 
 @dataclass
 class AbstractExtractionInput:
@@ -23,45 +21,34 @@ class AbstractExtractionInput:
     full_abstract: str = ""
     firms: list[str] = field(default_factory=list)
 
-    # Storage path for checkpoints (gs://bucket/prefix or local path)
-    # If empty, no checkpointing is performed
+    # Base storage path for saving results (gs://bucket/prefix or local path)
+    # Results are saved to GCS for download from the admin portal.
+    # If empty, no result storage is performed.
     storage_path: str = ""
 
-    # Which pipelines to run (default: all three)
-    # Options: "drug", "drug_class", "indication"
-    pipelines: list[str] = field(
-        default_factory=lambda: ["drug", "drug_class", "indication"]
-    )
+    # Which entity pipeline to run: "drug" (includes drug_class) or "indication"
+    entity: str = ""
+
+    # Batch context for SQL status tracking and GCS result paths
+    congress_id: int = 0
+    batch_id: int = 0
+
+    # GCS path to indication rules CSV (only used when entity="indication")
+    rules_file_path: str = ""
 
 
 @dataclass
 class StepResult:
-    """Result of a single step execution.
+    """Result of a single pipeline step execution.
 
-    Returned by _run_with_checkpoint to indicate step outcome.
-    Token usage is automatically extracted from activity output
-    and stored here for status.json updates.
+    Wraps the activity output with status tracking.
+    Token usage metadata is embedded by activities in their output dicts.
     """
     status: str  # "success" or "failed"
     output: Optional[dict] = None
-    from_checkpoint: bool = False
     error: Optional[str] = None
-    token_usage: Optional[dict] = None  # {"input_tokens": N, "output_tokens": N, "total_tokens": N}
+    token_usage: Optional[dict] = None
     llm_calls: int = 1
-
-    def to_step_status(self) -> StepStatus:
-        """Convert to StepStatus for status.json.
-
-        Reads token usage from self.token_usage automatically.
-        """
-        if self.status == "success":
-            return StepStatus.success(
-                llm_calls=self.llm_calls,
-                tokens=self.token_usage.get("total_tokens", 0) if self.token_usage else 0,
-                input_tokens=self.token_usage.get("input_tokens", 0) if self.token_usage else 0,
-                output_tokens=self.token_usage.get("output_tokens", 0) if self.token_usage else 0,
-            )
-        return StepStatus.failed(self.error or "Unknown error")
 
 
 @dataclass

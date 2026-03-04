@@ -30,9 +30,9 @@ class State(TypedDict):
 class IndicationValidationAgent:
     """LangGraph agent for indication validation."""
     
-    def __init__(self):
+    def __init__(self, rules_path: str = None, rules_data: list[dict] = None):
         """Initialize the validation agent using config settings."""
-        self.tools = get_tools()
+        self.tools = get_tools(rules_path=rules_path, rules_data=rules_data)
         
         self.llm = create_llm(LLMConfig(
             api_key=settings.llm.LLM_API_KEY,

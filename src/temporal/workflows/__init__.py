@@ -1,7 +1,7 @@
 """Temporal workflows for abstract extraction.
 
 This module exports:
-- AbstractExtractionWorkflow: Single flat workflow orchestrating all extraction steps
+- AbstractExtractionWorkflow: Entity workflow with signal-based pause/resume
 - Input/Output schemas (re-exported from schemas.workflow for convenience)
 """
 

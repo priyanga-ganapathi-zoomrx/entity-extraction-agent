@@ -18,17 +18,22 @@ Best Practices Applied:
 - Activities are idempotent - same input produces same output
 - Validation is a separate activity for independent scaling and retry configuration
 - Agent instances are created per-invocation to avoid state leakage between activities
+- Rules files are downloaded from GCS and cached at the worker level
 """
 
+import csv
+import io
 import json
 import re
 import time
+from functools import lru_cache
 
 from langchain_core.messages import AIMessage
 from pydantic import ValidationError
 from temporalio import activity
 
 from src.agents.core.ems_logger import get_logger
+from src.agents.core.storage import get_storage_client, parse_gcs_path
 from src.agents.core.token_tracking import TokenUsageCallbackHandler
 from src.agents.indication.config import config as ind_config
 from src.agents.indication.extraction_agent import IndicationAgent
@@ -41,9 +46,34 @@ from src.agents.indication.validation_agent import IndicationValidationAgent
 from src.temporal.idle_shutdown import track_activity
 
 
+@lru_cache(maxsize=16)
+def _download_rules(gcs_path: str) -> tuple[dict, ...]:
+    """Download a rules CSV from GCS and return parsed rows in-memory.
+
+    Results are cached at the worker-process level (lru_cache) so the
+    same GCS file is only downloaded once per worker pod.  Returns a
+    tuple of dicts (hashable for lru_cache).
+    """
+    bucket, prefix = parse_gcs_path(gcs_path)
+    storage = get_storage_client(f"gs://{bucket}")
+    content = storage.download_text(prefix)
+
+    reader = csv.DictReader(io.StringIO(content))
+    return tuple(
+        {k.strip(): v.strip() for k, v in row.items()} for row in reader
+    )
+
+
+def _get_rules_data(gcs_path: str) -> list[dict] | None:
+    """Resolve rules data from a GCS path, or None if path is empty."""
+    if not gcs_path:
+        return None
+    return list(_download_rules(gcs_path))
+
+
 class IndicationExtractionError(Exception):
     """Raised when indication extraction/validation fails.
-    
+
     This error triggers Temporal retry when raised from activities.
     """
     pass
@@ -186,8 +216,9 @@ def extract_indication(input_data: IndicationInput) -> dict:
     start = time.time()
     
     try:
-        # Create agent and invoke
-        agent = IndicationAgent()
+        rules_data = _get_rules_data(input_data.rules_file_path)
+
+        agent = IndicationAgent(rules_data=rules_data)
         raw_result = agent.invoke(
             abstract_title=input_data.abstract_title,
             session_title=input_data.session_title,
@@ -320,8 +351,9 @@ def validate_indication(
     start = time.time()
     
     try:
-        # Create agent and invoke
-        agent = IndicationValidationAgent()
+        rules_data = _get_rules_data(input_data.rules_file_path)
+
+        agent = IndicationValidationAgent(rules_data=rules_data)
         raw_result = agent.invoke(
             session_title=input_data.session_title,
             abstract_title=input_data.abstract_title,

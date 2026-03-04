@@ -21,6 +21,7 @@ class IndicationInput:
     abstract_id: str
     abstract_title: str
     session_title: str = ""
+    rules_file_path: str = ""
 
 
 # =============================================================================

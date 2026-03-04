@@ -30,8 +30,8 @@ class State(TypedDict):
 class IndicationAgent:
     """LangGraph agent for indication extraction."""
     
-    def __init__(self):
-        self.tools = get_tools()
+    def __init__(self, rules_path: str = None, rules_data: list[dict] = None):
+        self.tools = get_tools(rules_path=rules_path, rules_data=rules_data)
         self.llm = create_llm(LLMConfig(
             api_key=settings.llm.LLM_API_KEY,
             base_url=settings.llm.LLM_BASE_URL,

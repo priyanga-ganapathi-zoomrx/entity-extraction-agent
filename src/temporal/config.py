@@ -8,15 +8,15 @@ This module defines:
 
 Task Queue Design:
 - WORKFLOWS: Lightweight orchestration only
-- CHECKPOINT: Cross-cutting storage operations (load/save status, step outputs)
+- RESULT_STORAGE: GCS uploads for step output files (download from admin portal)
+- ENTITY_MAPPING_PROGRESS: SQL status updates to entity_mapping tables
 - DRUG: Drug extraction LLM activities
 - DRUG_CLASS: Drug class classification pipeline
-- INDICATION_EXTRACTION: Fast indication extraction (GPT-4)
+- INDICATION_EXTRACTION: Fast indication extraction
 - INDICATION_VALIDATION: Slow validation (Sonnet 4.5)
 
 Best Practices Applied:
 - Separate queues by workload characteristics (latency, resource needs)
-- Checkpoint queue shared across all pipelines for storage ops
 - LLM queues separated by latency profile
 - Non-retryable errors for validation/parsing failures
 """
@@ -53,8 +53,11 @@ class TaskQueues:
     # Workflow orchestration - no activities, just coordination
     WORKFLOWS = "extraction-workflows"
     
-    # Checkpoint/storage operations - fast, cross-cutting, used by all pipelines
-    CHECKPOINT = "checkpoint-storage"
+    # Result storage operations - saves step outputs to GCS for download
+    RESULT_STORAGE = "result-storage"
+    
+    # Extraction progress tracking - updates entity_mapping SQL tables
+    ENTITY_MAPPING_PROGRESS = "entity-mapping-progress"
     
     # Drug pipeline activities
     DRUG = "drug-activities"
@@ -80,8 +83,11 @@ class TaskQueues:
 class Timeouts:
     """Timeout configurations by activity type."""
     
-    # Storage/checkpoint activities (typically <1s)
-    STORAGE = timedelta(minutes=1)
+    # Result storage activities - GCS upload (typically <1s)
+    RESULT_STORAGE = timedelta(minutes=1)
+    
+    # Extraction progress SQL updates (allow for cold-start connection pool)
+    ENTITY_MAPPING_PROGRESS = timedelta(minutes=3)
     
     # Fast LLM activities - Gemini (typically 5-15s, preview models can spike to 90s+)
     FAST_LLM = timedelta(minutes=4)
@@ -92,11 +98,12 @@ class Timeouts:
     # Search activities - Tavily API (typically 2-10s)
     SEARCH = timedelta(seconds=45)
     
-    # Workflow execution timeout (entire abstract processing)
-    WORKFLOW_EXECUTION = timedelta(minutes=60)
+    # Workflow execution timeout — entity workflows can pause for days waiting
+    # for a retry signal, so this must be long.
+    WORKFLOW_EXECUTION = timedelta(hours=72)
     
-    # Workflow run timeout (single run before continue-as-new)
-    WORKFLOW_RUN = timedelta(minutes=60)
+    # Workflow run timeout (single run including pause time)
+    WORKFLOW_RUN = timedelta(hours=72)
 
 
 # =============================================================================
@@ -114,8 +121,8 @@ class Timeouts:
 class RetryPolicies:
     """Retry policies by activity type."""
     
-    # Storage activities - quick retries for transient failures
-    STORAGE = RetryPolicy(
+    # Result storage activities - quick retries for transient GCS failures
+    RESULT_STORAGE = RetryPolicy(
         initial_interval=timedelta(seconds=1),
         backoff_coefficient=2.0,
         maximum_interval=timedelta(seconds=10),
@@ -123,6 +130,18 @@ class RetryPolicies:
         non_retryable_error_types=[
             "ValueError",
             "PermissionError",
+        ],
+    )
+    
+    # Extraction progress SQL updates - handle transient DB unavailability
+    ENTITY_MAPPING_PROGRESS = RetryPolicy(
+        initial_interval=timedelta(seconds=5),
+        backoff_coefficient=2.0,
+        maximum_interval=timedelta(seconds=60),
+        maximum_attempts=5,
+        non_retryable_error_types=[
+            "ValueError",
+            "IntegrityError",
         ],
     )
     
@@ -167,7 +186,8 @@ class RetryPolicies:
 # =============================================================================
 # Worker configuration by queue:
 # - Workflows: High concurrency (lightweight coordination)
-# - Checkpoint: Moderate concurrency (fast I/O bound)
+# - Result Storage: Moderate concurrency (fast GCS I/O bound)
+# - Extraction Progress: Moderate concurrency (SQL writes)
 # - LLM queues: Tuned for API rate limits
 #
 # Each queue should have its own dedicated worker process.
@@ -182,9 +202,14 @@ class WorkerSettings:
         "max_cached_workflows": 50,
     }
     
-    # Checkpoint worker - fast storage operations
-    CHECKPOINT = {
-        "max_concurrent_activities": 30,  # I/O bound, can be high
+    # Result storage worker - GCS uploads (I/O bound, can be high)
+    RESULT_STORAGE = {
+        "max_concurrent_activities": 30,
+    }
+    
+    # Extraction progress worker - SQL updates (I/O bound)
+    ENTITY_MAPPING_PROGRESS = {
+        "max_concurrent_activities": 20,
     }
     
     # Drug activities - fast LLM calls
