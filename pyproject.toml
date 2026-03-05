@@ -31,6 +31,8 @@ sentry-sdk = "^2.52.0"
 structlog = "^25.5.0"
 ecs-logging = "^2.3.0"
 google-cloud-pubsub = "^2.35.0"
+sqlalchemy = "^2.0.48"
+pymysql = "^1.1.2"
 
 [build-system]
 requires = ["poetry-core"]
