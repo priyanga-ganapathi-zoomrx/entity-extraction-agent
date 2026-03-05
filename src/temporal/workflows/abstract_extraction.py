@@ -277,11 +277,11 @@ class AbstractExtractionWorkflow:
         data: dict,
     ) -> None:
         """Save a step result to GCS for download from the admin portal."""
-        if not input.storage_path:
+        if not input.batch_id:
             return
         await workflow.execute_activity(
             save_step_output,
-            args=[input.storage_path, input.batch_id, input.abstract_id, step_name, data],
+            args=[input.batch_id, input.abstract_id, step_name, data],
             task_queue=TaskQueues.RESULT_STORAGE,
             start_to_close_timeout=Timeouts.RESULT_STORAGE,
             retry_policy=RetryPolicies.RESULT_STORAGE,
@@ -525,7 +525,7 @@ class AbstractExtractionWorkflow:
                     # Step 2a: Fetch search results
                     search_result = await workflow.execute_activity(
                         step2_fetch_search_results,
-                        args=[component, input.firms, input.storage_path],
+                        args=[component, input.firms, input.congress_id, input.abstract_id],
                         task_queue=TaskQueues.DRUG_CLASS,
                         start_to_close_timeout=Timeouts.SEARCH,
                         retry_policy=RetryPolicies.SEARCH,
@@ -640,7 +640,7 @@ class AbstractExtractionWorkflow:
             try:
                 search_result = await workflow.execute_activity(
                     step2_fetch_search_results,
-                    args=[component, input.firms, input.storage_path],
+                    args=[component, input.firms, input.congress_id, input.abstract_id],
                     task_queue=TaskQueues.DRUG_CLASS,
                     start_to_close_timeout=Timeouts.SEARCH,
                     retry_policy=RetryPolicies.SEARCH,

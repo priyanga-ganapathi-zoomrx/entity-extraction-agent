@@ -18,7 +18,9 @@ Best Practices Applied:
 - Activities are idempotent - same input produces same output
 - Validation is a separate activity for independent scaling and retry configuration
 - Agent instances are created per-invocation to avoid state leakage between activities
-- Rules files are downloaded from GCS and cached at the worker level
+- Rules CSV is downloaded from GCS using GCS_BUCKET_NAME env + relative path
+  (same pattern as prompt loading), cached in-memory per worker pod
+- Missing rules file or missing bucket config raises non-retryable ApplicationError
 """
 
 import csv
@@ -31,9 +33,11 @@ from functools import lru_cache
 from langchain_core.messages import AIMessage
 from pydantic import ValidationError
 from temporalio import activity
+from temporalio.exceptions import ApplicationError
 
+from src.agents.core.config import settings
 from src.agents.core.ems_logger import get_logger
-from src.agents.core.storage import get_storage_client, parse_gcs_path
+from src.agents.core.storage import GCSStorageClient
 from src.agents.core.token_tracking import TokenUsageCallbackHandler
 from src.agents.indication.config import config as ind_config
 from src.agents.indication.extraction_agent import IndicationAgent
@@ -47,16 +51,33 @@ from src.temporal.idle_shutdown import track_activity
 
 
 @lru_cache(maxsize=16)
-def _download_rules(gcs_path: str) -> tuple[dict, ...]:
+def _download_rules(rules_relative_path: str) -> tuple[dict, ...]:
     """Download a rules CSV from GCS and return parsed rows in-memory.
 
+    Uses GCS_BUCKET_NAME from env (same pattern as prompt loading).
     Results are cached at the worker-process level (lru_cache) so the
-    same GCS file is only downloaded once per worker pod.  Returns a
-    tuple of dicts (hashable for lru_cache).
+    same file is only downloaded once per worker pod.  Returns a tuple
+    of dicts (hashable for lru_cache).
+
+    Args:
+        rules_relative_path: Path relative to the GCS bucket root
+            (e.g. "rules/indication/v3_rules.csv")
+
+    Raises:
+        ApplicationError(non_retryable=True): If the file does not exist
+            in GCS — a permanent failure that should not be retried by Temporal.
     """
-    bucket, prefix = parse_gcs_path(gcs_path)
-    storage = get_storage_client(f"gs://{bucket}")
-    content = storage.download_text(prefix)
+    bucket_name = settings.gcs.GCS_BUCKET_NAME
+    try:
+        storage = GCSStorageClient(bucket_name)
+        content = storage.download_text(rules_relative_path)
+    except FileNotFoundError:
+        raise ApplicationError(
+            f"Rules file not found in GCS: {rules_relative_path} "
+            f"(bucket: {bucket_name})",
+            type="RulesFileNotFound",
+            non_retryable=True,
+        )
 
     reader = csv.DictReader(io.StringIO(content))
     return tuple(
@@ -64,11 +85,19 @@ def _download_rules(gcs_path: str) -> tuple[dict, ...]:
     )
 
 
-def _get_rules_data(gcs_path: str) -> list[dict] | None:
-    """Resolve rules data from a GCS path, or None if path is empty."""
-    if not gcs_path:
+def _get_rules_data(rules_relative_path: str) -> list[dict] | None:
+    """Resolve rules data from a GCS relative path, or None if path is empty.
+
+    Returns:
+        Parsed list of rule dicts, or None when no rules path is provided.
+
+    Raises:
+        ApplicationError(non_retryable=True): Propagated from _download_rules
+            for missing config or missing file.
+    """
+    if not rules_relative_path:
         return None
-    return list(_download_rules(gcs_path))
+    return list(_download_rules(rules_relative_path))
 
 
 class IndicationExtractionError(Exception):

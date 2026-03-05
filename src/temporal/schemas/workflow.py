@@ -21,19 +21,16 @@ class AbstractExtractionInput:
     full_abstract: str = ""
     firms: list[str] = field(default_factory=list)
 
-    # Base storage path for saving results (gs://bucket/prefix or local path)
-    # Results are saved to GCS for download from the admin portal.
-    # If empty, no result storage is performed.
-    storage_path: str = ""
-
     # Which entity pipeline to run: "drug" (includes drug_class) or "indication"
     entity: str = ""
 
-    # Batch context for SQL status tracking and GCS result paths
+    # Batch/congress context for SQL status tracking and GCS result/cache paths.
+    # GCS paths are constructed from GCS_BUCKET_NAME env + congress_id/batch_id.
     congress_id: int = 0
     batch_id: int = 0
 
-    # GCS path to indication rules CSV (only used when entity="indication")
+    # Relative path to indication rules CSV within GCS_BUCKET_NAME
+    # (e.g. "rules/indication/v3_rules.csv"). Only used when entity="indication".
     rules_file_path: str = ""
 
 

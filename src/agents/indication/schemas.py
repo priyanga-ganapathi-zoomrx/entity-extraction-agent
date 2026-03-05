@@ -21,6 +21,7 @@ class IndicationInput:
     abstract_id: str
     abstract_title: str
     session_title: str = ""
+    # Relative path to rules CSV within GCS_BUCKET_NAME (e.g. "rules/indication/v3.csv")
     rules_file_path: str = ""
 
 

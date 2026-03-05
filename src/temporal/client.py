@@ -12,8 +12,8 @@ Usage:
     # Run indication extraction
     python -m src.temporal.client --input data/abstracts.csv --entity indication
 
-    # GCS input with explicit storage path
-    python -m src.temporal.client --input gs://bucket/abstracts.csv --storage_path gs://bucket/output --entity drug
+    # GCS input
+    python -m src.temporal.client --input gs://bucket/abstracts.csv --entity drug --congress_id 123 --batch_id 456
 
 For workflow status inspection, use the Temporal UI or CLI:
     temporal workflow list --query "ExecutionStatus = 'Running'"
@@ -213,7 +213,6 @@ async def start_batch_extraction(
     items: list[BatchItem],
     entity: str = "drug",
     max_concurrent: int = 50,
-    storage_path: str = "",
     congress_id: int = 0,
     batch_id: int = 0,
     rules_file_path: str = "",
@@ -229,10 +228,9 @@ async def start_batch_extraction(
         items: List of BatchItem objects to process
         entity: Entity type to extract ("drug" or "indication")
         max_concurrent: Maximum concurrent workflow executions (default 50)
-        storage_path: Base path for GCS results (gs://bucket/prefix or local path)
-        congress_id: Congress ID for SQL tracking
-        batch_id: Batch ID for SQL tracking and GCS path hierarchy
-        rules_file_path: GCS path to indication rules CSV (entity="indication" only)
+        congress_id: Congress ID for SQL tracking and search cache scoping
+        batch_id: Batch ID for SQL tracking and GCS result path hierarchy
+        rules_file_path: Relative path to indication rules CSV (entity="indication" only)
         
     Yields:
         BatchResult objects as workflows complete
@@ -256,7 +254,6 @@ async def start_batch_extraction(
                     session_title=item.session_title,
                     full_abstract=item.full_abstract,
                     firms=item.firms,
-                    storage_path=storage_path,
                     entity=entity,
                     congress_id=congress_id,
                     batch_id=batch_id,
@@ -338,7 +335,7 @@ def _print_batch_summary(
     total: int,
     success_results: list[BatchResult],
     failed_results: list[BatchResult],
-    storage_path: str,
+    output_dir: str = "output",
 ) -> None:
     """Print batch summary and write retry CSV if needed."""
     from datetime import datetime
@@ -351,14 +348,8 @@ def _print_batch_summary(
     print(f"  Success:  {len(success_results)}")
     print(f"  Failed:   {len(failed_results)}")
 
-    base_path = storage_path
-
-    if base_path.startswith("gs://"):
-        failed_path = f"{base_path.rstrip('/')}/failed_{timestamp}.csv"
-    else:
-        failed_path = str(Path(base_path) / f"failed_{timestamp}.csv")
-
     if failed_results:
+        failed_path = str(Path(output_dir) / f"failed_{timestamp}.csv")
         _write_retry_csv(failed_path, failed_results)
         print(f"\n  Retry (failed):  {failed_path} ({len(failed_results)} items)")
     else:
@@ -381,11 +372,13 @@ Examples:
     # Run drug extraction
     python -m src.temporal.client --input data/abstracts.csv --entity drug
 
-    # Run indication extraction
-    python -m src.temporal.client --input data/abstracts.csv --entity indication
+    # Run indication extraction with rules
+    python -m src.temporal.client --input data/abstracts.csv --entity indication \\
+        --rules_file_path rules/indication/v3_rules.csv
 
-    # GCS input with explicit storage
-    python -m src.temporal.client --input gs://bucket/abstracts.csv --storage_path gs://bucket/output --entity drug
+    # Full production run
+    python -m src.temporal.client --input gs://bucket/abstracts.csv --entity drug \\
+        --congress_id 123 --batch_id 456
 
     # Limit concurrency and abstracts
     python -m src.temporal.client --input data/abstracts.csv --entity drug --max_concurrent 100 --limit 10
@@ -403,15 +396,22 @@ Examples:
         help="Entity type to extract: 'drug' (includes drug_class) or 'indication'",
     )
     parser.add_argument(
+        "--congress_id",
+        type=int,
+        default=0,
+        help="Congress ID for SQL tracking and search cache scoping",
+    )
+    parser.add_argument(
+        "--batch_id",
+        type=int,
+        default=0,
+        help="Batch ID for SQL tracking and GCS result path hierarchy",
+    )
+    parser.add_argument(
         "--max_concurrent",
         type=int,
         default=50,
         help="Maximum concurrent workflows (default: 50)",
-    )
-    parser.add_argument(
-        "--storage_path",
-        default="",
-        help="Base path for results (gs://bucket/prefix or local path). Defaults to input CSV's parent directory.",
     )
     parser.add_argument(
         "--limit",
@@ -422,16 +422,9 @@ Examples:
     parser.add_argument(
         "--rules_file_path",
         default="",
-        help="GCS path to indication rules CSV (only used with --entity indication)",
+        help="Relative path to indication rules CSV within GCS_BUCKET_NAME (only used with --entity indication)",
     )
     args = parser.parse_args()
-
-    # Derive storage_path from input CSV's parent directory when not explicitly set
-    if not args.storage_path:
-        if args.input.startswith("gs://"):
-            args.storage_path = args.input.rsplit("/", 1)[0]
-        else:
-            args.storage_path = str(Path(args.input).parent)
 
     # Load items from CSV
     print(f"Loading abstracts from {args.input}...")
@@ -444,7 +437,6 @@ Examples:
 
     # Run batch extraction
     print(f"Starting batch extraction (entity: {args.entity}, max_concurrent: {args.max_concurrent})...")
-    print(f"Storage: {args.storage_path}")
 
     # --- EMS: batch_started ---
     from src.agents.core.ems_logger import get_logger as _get_ems_logger
@@ -460,7 +452,8 @@ Examples:
         max_concurrent=args.max_concurrent,
         entity=args.entity,
         input_csv_path=args.input,
-        storage_path=args.storage_path,
+        congress_id=args.congress_id,
+        batch_id_int=args.batch_id,
     )
 
     success_results = []
@@ -470,7 +463,8 @@ Examples:
         items,
         entity=args.entity,
         max_concurrent=args.max_concurrent,
-        storage_path=args.storage_path,
+        congress_id=args.congress_id,
+        batch_id=args.batch_id,
         rules_file_path=args.rules_file_path,
     ):
         status = result.status
@@ -500,7 +494,6 @@ Examples:
         total=len(items),
         success_results=success_results,
         failed_results=failed_results,
-        storage_path=args.storage_path,
     )
 
 

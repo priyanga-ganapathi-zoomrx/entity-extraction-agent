@@ -33,8 +33,9 @@ import time
 
 from temporalio import activity
 
+from src.agents.core.config import settings
 from src.agents.core.ems_logger import get_logger
-from src.agents.core.storage import get_storage_client
+from src.agents.core.storage import GCSStorageClient
 from src.agents.core.token_tracking import TokenUsageCallbackHandler
 from src.agents.drug_class.config import config as dc_config
 from src.agents.drug_class.schemas import (
@@ -158,17 +159,24 @@ def step1_regimen(input_data: RegimenInput) -> dict:
 def step2_fetch_search_results(
     drug: str,
     firms: list[str],
-    storage_base_path: str = "",
+    congress_id: int = 0,
+    abstract_id: str = "",
 ) -> dict:
     """Fetch search results for a drug using Tavily API with caching.
     
     This activity fetches drug class and firm search results.
-    Results are cached globally to avoid duplicate API calls.
+    Results are cached at the congress level to avoid duplicate Tavily
+    API calls within the same congress while ensuring freshness across
+    different congresses.
+    
+    Cache path: search_cache/{congress_id}/{normalized_drug}.json
+    Uses GCS_BUCKET_NAME from env (same pattern as other storage).
     
     Args:
         drug: Drug name to search
         firms: List of pharmaceutical company names
-        storage_base_path: Base path for cache storage
+        congress_id: Congress ID for cache scoping
+        abstract_id: Abstract/session ID for EMS logging
     
     Returns:
         dict: Contains:
@@ -176,7 +184,7 @@ def step2_fetch_search_results(
             - firm_search_results: List of search results for drug + firm
     
     Example:
-        >>> result = step2_fetch_search_results("pembrolizumab", ["Merck"])
+        >>> result = step2_fetch_search_results("pembrolizumab", ["Merck"], 123, "719267")
         >>> len(result["drug_class_results"])
         5
     """
@@ -186,15 +194,14 @@ def step2_fetch_search_results(
     
     ems_logger = get_logger("drug_class_step2_search")
     info = activity.info()
-    # Derive abstract_id from workflow_id (format: "entity-extraction-{abstract_id}")
-    abstract_id = info.workflow_id.removeprefix("entity-extraction-")
     start = time.time()
     
     try:
-        # Create storage client for caching (auto-detects GCS vs local)
-        storage = get_storage_client(storage_base_path) if storage_base_path else get_storage_client("output")
+        storage = GCSStorageClient(
+            settings.gcs.GCS_BUCKET_NAME,
+            base_prefix=f"search_cache/{congress_id}",
+        )
         
-        # Call existing function - returns tuple
         drug_class_results, firm_search_results = fetch_search_results(drug, firms, storage)
         duration_ms = int((time.time() - start) * 1000)
         
