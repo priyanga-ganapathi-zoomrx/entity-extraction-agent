@@ -9,7 +9,7 @@ GCS is used purely to store downloadable result files.
 Uses GCS_BUCKET_NAME from env (same pattern as prompts and rules).
 
 Storage layout:
-    batches/{batch_id}/abstracts/{abstract_id}/{step_name}.json
+    congress/{congress_id}/batches/{batch_id}/abstracts/{abstract_id}/{step_name}.json
 """
 
 from temporalio import activity
@@ -22,6 +22,7 @@ from src.temporal.idle_shutdown import track_activity
 @activity.defn(name="save_step_output")
 @track_activity
 def save_step_output(
+    congress_id: int,
     batch_id: int,
     abstract_id: str,
     step_name: str,
@@ -29,15 +30,14 @@ def save_step_output(
 ) -> None:
     """Save a step's output to GCS for later download.
 
-    Constructs the GCS path from GCS_BUCKET_NAME env + batch_id/abstract_id/step_name.
-
     Args:
+        congress_id: The congress ID (top-level folder in GCS)
         batch_id: The batch ID (used in GCS path hierarchy)
         abstract_id: The abstract/session ID
         step_name: Name of the step (e.g., "drug_extraction", "drug_validation")
         data: Step output dict to save
     """
     storage = GCSStorageClient(settings.gcs.GCS_BUCKET_NAME)
-    path = f"batches/{batch_id}/abstracts/{abstract_id}/{step_name}.json"
+    path = f"congress/{congress_id}/batches/{batch_id}/abstracts/{abstract_id}/{step_name}.json"
     storage.upload_json(path, data)
     activity.logger.info(f"Saved {step_name} result for abstract {abstract_id} (batch {batch_id})")

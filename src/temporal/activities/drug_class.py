@@ -169,7 +169,7 @@ def step2_fetch_search_results(
     API calls within the same congress while ensuring freshness across
     different congresses.
     
-    Cache path: search_cache/{congress_id}/{normalized_drug}.json
+    Cache path: congress/{congress_id}/search_cache/{normalized_drug}.json
     Uses GCS_BUCKET_NAME from env (same pattern as other storage).
     
     Args:
@@ -199,7 +199,7 @@ def step2_fetch_search_results(
     try:
         storage = GCSStorageClient(
             settings.gcs.GCS_BUCKET_NAME,
-            base_prefix=f"search_cache/{congress_id}",
+            base_prefix=f"congress/{congress_id}/search_cache",
         )
         
         drug_class_results, firm_search_results = fetch_search_results(drug, firms, storage)
