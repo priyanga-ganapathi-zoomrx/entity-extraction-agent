@@ -17,7 +17,7 @@ class DrugClassInput:
     
     Chains from drug extraction output.
     """
-    abstract_id: str
+    abstract_id: int
     abstract_title: str
     full_abstract: str = ""
     primary_drugs: list[str] = field(default_factory=list)
@@ -31,7 +31,7 @@ class DrugClassInput:
 @dataclass
 class RegimenInput:
     """Input for regimen identification (single drug)."""
-    abstract_id: str
+    abstract_id: int
     abstract_title: str
     drug: str
 
@@ -43,7 +43,7 @@ class RegimenInput:
 @dataclass
 class DrugClassExtractionInput:
     """Input for drug class extraction (single drug)."""
-    abstract_id: str
+    abstract_id: int
     abstract_title: str
     drug: str
     full_abstract: str = ""
@@ -59,7 +59,7 @@ class DrugClassExtractionInput:
 @dataclass
 class SelectionInput:
     """Input for drug class selection (single drug)."""
-    abstract_id: str
+    abstract_id: int
     drug_name: str
     extraction_details: list[dict]
 
@@ -71,7 +71,7 @@ class SelectionInput:
 @dataclass
 class ExplicitExtractionInput:
     """Input for explicit extraction from title."""
-    abstract_id: str
+    abstract_id: int
     abstract_title: str
 
 
@@ -82,7 +82,7 @@ class ExplicitExtractionInput:
 @dataclass
 class ConsolidationInput:
     """Input for consolidation."""
-    abstract_id: str
+    abstract_id: int
     abstract_title: str
     explicit_drug_classes: list[str]
     drug_selections: list[dict]  # [{drug_name, selected_classes}, ...]
@@ -99,7 +99,7 @@ class ValidationInput:
     Contains the original extraction inputs and the result to validate,
     plus outputs from steps 3-5 for selection/title/consolidation checks.
     """
-    abstract_id: str
+    abstract_id: int
     drug_name: str
     abstract_title: str
     full_abstract: str

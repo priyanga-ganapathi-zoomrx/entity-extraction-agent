@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 # HELPERS
 # =============================================================================
 
-def generate_workflow_id(entity: str, abstract_id: str) -> str:
+def generate_workflow_id(entity: str, abstract_id: int) -> str:
     """Generate a consistent workflow ID from entity and abstract ID.
 
     Format: entity_mapping_{entity}_{abstract_id}
@@ -109,7 +109,7 @@ def _parse_firms(value: str) -> list[str]:
 @dataclass
 class BatchItem:
     """Single item for batch extraction."""
-    abstract_id: str
+    abstract_id: int
     abstract_title: str
     session_title: str = ""
     full_abstract: str = ""
@@ -123,7 +123,7 @@ class BatchItem:
 @dataclass
 class BatchResult:
     """Result of a batch extraction item."""
-    abstract_id: str
+    abstract_id: int
     abstract_title: str
     workflow_id: str
     output: Optional[AbstractExtractionOutput] = None
@@ -183,16 +183,20 @@ def load_batch_items(csv_path: str, limit: Optional[int] = None) -> list[BatchIt
     
     items = []
     for row in reader:
-        abstract_id = row.get(id_col, "") if id_col else ""
-        if not abstract_id:
-            continue  # Skip rows without ID
+        raw_id = row.get(id_col, "").strip() if id_col else ""
+        if not raw_id:
+            continue
+        try:
+            abstract_id = int(raw_id)
+        except ValueError:
+            continue
         
         # Parse firms (handles ;; separated, JSON array, comma separated)
         firm_value = str(row.get(firm_col, "")).strip() if firm_col else ""
         firms = _parse_firms(firm_value)
             
         items.append(BatchItem(
-            abstract_id=str(abstract_id).strip(),
+            abstract_id=abstract_id,
             abstract_title=str(row.get(title_col, "")).strip() if title_col else "",
             session_title=str(row.get(session_col, "")).strip() if session_col else "",
             full_abstract=str(row.get(abstract_col, "")).strip() if abstract_col else "",
@@ -398,13 +402,13 @@ Examples:
     parser.add_argument(
         "--congress_id",
         type=int,
-        default=0,
+        required=True,
         help="Congress ID for SQL tracking and search cache scoping",
     )
     parser.add_argument(
         "--batch_id",
         type=int,
-        default=0,
+        required=True,
         help="Batch ID for SQL tracking and GCS result path hierarchy",
     )
     parser.add_argument(

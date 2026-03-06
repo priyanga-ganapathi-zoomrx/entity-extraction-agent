@@ -15,19 +15,14 @@ class AbstractExtractionInput:
     Best Practice: Single dataclass input allows adding fields
     without breaking existing workflow executions.
     """
-    abstract_id: str
+    abstract_id: int
     abstract_title: str
+    entity: str
+    congress_id: int
+    batch_id: int
     session_title: str = ""
     full_abstract: str = ""
     firms: list[str] = field(default_factory=list)
-
-    # Which entity pipeline to run: "drug" (includes drug_class) or "indication"
-    entity: str = ""
-
-    # Batch/congress context for SQL status tracking and GCS result/cache paths.
-    # GCS paths are constructed from GCS_BUCKET_NAME env + congress_id/batch_id.
-    congress_id: int = 0
-    batch_id: int = 0
 
     # Relative path to indication rules CSV within GCS_BUCKET_NAME
     # (e.g. "rules/indication/v3_rules.csv"). Only used when entity="indication".
@@ -74,7 +69,7 @@ class IndicationResult:
 @dataclass
 class AbstractExtractionOutput:
     """Output from the abstract extraction workflow."""
-    abstract_id: str
+    abstract_id: int
     drug: DrugResult = field(default_factory=DrugResult)
     drug_class: DrugClassResult = field(default_factory=DrugClassResult)
     indication: IndicationResult = field(default_factory=IndicationResult)

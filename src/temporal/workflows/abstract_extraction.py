@@ -204,9 +204,8 @@ class AbstractExtractionWorkflow:
                 return self._output
 
             except asyncio.CancelledError:
-                # Temporal cancellation (abort while activity is running)
                 self._current_status = "aborted"
-                self._update_progress_on_failure(input)
+                self._update_progress_on_abort(input)
                 raise
 
             except Exception as e:
@@ -231,6 +230,7 @@ class AbstractExtractionWorkflow:
 
                 if self._abort_requested:
                     self._current_status = "aborted"
+                    self._update_progress_on_abort(input)
                     workflow.logger.info(
                         f"Abort signal received for {input.abstract_id}"
                     )
@@ -256,41 +256,40 @@ class AbstractExtractionWorkflow:
         entity: str,
         status: str,
     ) -> None:
-        """Update extraction progress in SQL via the stub activity."""
-        if not input.batch_id:
-            return
-        try:
-            await workflow.execute_activity(
-                update_extraction_progress,
-                args=[
-                    input.batch_id,
-                    input.congress_id,
-                    int(input.abstract_id),
-                    entity,
-                    status,
-                ],
-                task_queue=TaskQueues.ENTITY_MAPPING_PROGRESS,
-                start_to_close_timeout=Timeouts.ENTITY_MAPPING_PROGRESS,
-                retry_policy=RetryPolicies.ENTITY_MAPPING_PROGRESS,
-            )
-        except Exception as e:
-            workflow.logger.warning(
-                f"Failed to update progress for {input.abstract_id}: {e}"
-            )
+        """Update extraction progress in SQL via the progress activity.
+
+        No try/except — if this fails, the exception propagates and the
+        workflow pauses, allowing the admin to fix the issue and retry.
+        """
+        await workflow.execute_activity(
+            update_extraction_progress,
+            args=[input.batch_id, input.congress_id, input.abstract_id, entity, status],
+            task_queue=TaskQueues.ENTITY_MAPPING_PROGRESS,
+            start_to_close_timeout=Timeouts.ENTITY_MAPPING_PROGRESS,
+            retry_policy=RetryPolicies.ENTITY_MAPPING_PROGRESS,
+        )
 
     def _update_progress_on_failure(self, input: AbstractExtractionInput) -> None:
-        """Best-effort progress update on failure (fire-and-forget).
+        """Fire-and-forget progress update on pipeline failure.
 
-        Uses _current_entity (set before each sub-pipeline) to mark only
-        the entity that actually failed, avoiding overwriting an earlier
-        success for a different sub-entity.
+        Uses _current_entity to mark only the entity that actually failed,
+        avoiding overwriting an earlier success for a different sub-entity.
         """
         entity = self._current_entity or input.entity
-        if not input.batch_id or not entity:
-            return
         workflow.start_activity(
             update_extraction_progress,
-            args=[input.batch_id, input.congress_id, int(input.abstract_id), entity, "failed"],
+            args=[input.batch_id, input.congress_id, input.abstract_id, entity, "failed"],
+            task_queue=TaskQueues.ENTITY_MAPPING_PROGRESS,
+            start_to_close_timeout=Timeouts.ENTITY_MAPPING_PROGRESS,
+            retry_policy=RetryPolicies.ENTITY_MAPPING_PROGRESS,
+        )
+
+    def _update_progress_on_abort(self, input: AbstractExtractionInput) -> None:
+        """Fire-and-forget progress update on abort signal or cancellation."""
+        entity = self._current_entity or input.entity
+        workflow.start_activity(
+            update_extraction_progress,
+            args=[input.batch_id, input.congress_id, input.abstract_id, entity, "aborted"],
             task_queue=TaskQueues.ENTITY_MAPPING_PROGRESS,
             start_to_close_timeout=Timeouts.ENTITY_MAPPING_PROGRESS,
             retry_policy=RetryPolicies.ENTITY_MAPPING_PROGRESS,
@@ -303,15 +302,17 @@ class AbstractExtractionWorkflow:
     async def _save_result(
         self,
         input: AbstractExtractionInput,
+        entity: str,
         step_name: str,
         data: dict,
     ) -> None:
-        """Save a step result to GCS for download from the admin portal."""
-        if not input.batch_id:
-            return
+        """Save a step result to GCS for download from the admin portal.
+
+        Path: congress/{cid}/batches/{bid}/{entity}/{sid}/{step_name}.json
+        """
         await workflow.execute_activity(
             save_step_output,
-            args=[input.congress_id, input.batch_id, input.abstract_id, step_name, data],
+            args=[input.congress_id, input.batch_id, entity, input.abstract_id, step_name, data],
             task_queue=TaskQueues.RESULT_STORAGE,
             start_to_close_timeout=Timeouts.RESULT_STORAGE,
             retry_policy=RetryPolicies.RESULT_STORAGE,
@@ -353,7 +354,7 @@ class AbstractExtractionWorkflow:
                 retry_policy=RetryPolicies.FAST_LLM,
             )
             self._extract_token_metadata(extraction)
-            await self._save_result(input, "drug_extraction", extraction)
+            await self._save_result(input, "drug", "extraction", extraction)
             self._output.drug.extraction = extraction
         else:
             workflow.logger.info(f"Skipping completed drug extraction for {input.abstract_id}")
@@ -372,7 +373,7 @@ class AbstractExtractionWorkflow:
                 retry_policy=RetryPolicies.FAST_LLM,
             )
             self._extract_token_metadata(validation)
-            await self._save_result(input, "drug_validation", validation)
+            await self._save_result(input, "drug", "validation", validation)
             self._output.drug.validation = validation
         else:
             workflow.logger.info(f"Skipping completed drug validation for {input.abstract_id}")
@@ -406,7 +407,7 @@ class AbstractExtractionWorkflow:
                 retry_policy=RetryPolicies.FAST_LLM,
             )
             self._extract_token_metadata(extraction)
-            await self._save_result(input, "indication_extraction", extraction)
+            await self._save_result(input, "indication", "extraction", extraction)
             self._output.indication.extraction = extraction
         else:
             workflow.logger.info(
@@ -423,7 +424,7 @@ class AbstractExtractionWorkflow:
                 retry_policy=RetryPolicies.SLOW_LLM,
             )
             self._extract_token_metadata(validation)
-            await self._save_result(input, "indication_validation", validation)
+            await self._save_result(input, "indication", "validation", validation)
             self._output.indication.validation = validation
         else:
             workflow.logger.info(
@@ -465,7 +466,7 @@ class AbstractExtractionWorkflow:
         # Save aggregate output once all drugs complete
         if not self._output.drug_class.drug_results:
             steps1_3_data = self._build_steps1_3_output(primary_drugs)
-            await self._save_result(input, "drug_class_steps1_3", steps1_3_data)
+            await self._save_result(input, "drug_class", "steps1_3", steps1_3_data)
             self._output.drug_class.drug_results = steps1_3_data["drug_results"]
 
         # ---- Step 4: Explicit extraction from title ----
@@ -481,7 +482,7 @@ class AbstractExtractionWorkflow:
                 retry_policy=RetryPolicies.FAST_LLM,
             )
             self._extract_token_metadata(step4_result)
-            await self._save_result(input, "drug_class_step4", step4_result)
+            await self._save_result(input, "drug_class", "step4", step4_result)
             self._output.drug_class.explicit_classes = step4_result.get(
                 "explicit_drug_classes", []
             )
@@ -509,7 +510,7 @@ class AbstractExtractionWorkflow:
                     retry_policy=RetryPolicies.FAST_LLM,
                 )
                 self._extract_token_metadata(step5_result)
-                await self._save_result(input, "drug_class_step5", step5_result)
+                await self._save_result(input, "drug_class", "step5", step5_result)
                 self._dc_step5_output = step5_result
                 self._output.drug_class.refined_explicit_classes = (
                     step5_result.get("refined_explicit_classes", explicit)
@@ -526,7 +527,7 @@ class AbstractExtractionWorkflow:
         if self._dc_validation_data is None:
             self._dc_validation_data = await self._run_drug_class_validation(input)
             self._extract_token_metadata(self._dc_validation_data)
-            await self._save_result(input, "drug_class_validation", self._dc_validation_data)
+            await self._save_result(input, "drug_class", "validation", self._dc_validation_data)
             self._output.drug_class.validation_results = self._dc_validation_data.get("results", [])
 
             if self._dc_validation_data.get("errors"):

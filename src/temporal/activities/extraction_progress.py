@@ -37,7 +37,7 @@ def update_extraction_progress(
         congress_id: The congress ID (FK to congresses)
         session_id: The session/abstract ID (FK to sessions)
         entity: Entity type ("drug", "drug_class", "indication")
-        status: New status ("pending", "running", "success", "failed")
+        status: New status ("pending", "running", "success", "failed", "aborted")
     """
     now = datetime.now(timezone.utc)
 

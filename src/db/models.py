@@ -11,7 +11,7 @@ from sqlalchemy.orm import declarative_base
 Base = declarative_base()
 
 ENTITY_CHOICES = ("drug", "drug_class", "indication")
-SESSION_STATUS_CHOICES = ("pending", "running", "success", "failed")
+SESSION_STATUS_CHOICES = ("pending", "running", "success", "failed", "aborted")
 
 
 class EntityMappingBatchesSessions(Base):

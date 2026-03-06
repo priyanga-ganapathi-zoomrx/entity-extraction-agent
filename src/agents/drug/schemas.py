@@ -22,14 +22,14 @@ from pydantic import BaseModel, Field
 @dataclass
 class DrugInput:
     """Input for drug extraction."""
-    abstract_id: str
+    abstract_id: int
     abstract_title: str
 
 
 @dataclass
 class ValidationInput:
     """Input for drug validation."""
-    abstract_id: str
+    abstract_id: int
     abstract_title: str
     extraction_result: dict  # The ExtractionResult as dict
 

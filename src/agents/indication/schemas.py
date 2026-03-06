@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 @dataclass
 class IndicationInput:
     """Input for indication extraction activity."""
-    abstract_id: str
+    abstract_id: int
     abstract_title: str
     session_title: str = ""
     # Relative path to rules CSV within GCS_BUCKET_NAME (e.g. "rules/indication/v3.csv")

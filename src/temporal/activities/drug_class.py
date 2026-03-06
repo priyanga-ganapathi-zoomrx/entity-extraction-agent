@@ -160,7 +160,7 @@ def step2_fetch_search_results(
     drug: str,
     firms: list[str],
     congress_id: int = 0,
-    abstract_id: str = "",
+    abstract_id: int = 0,
 ) -> dict:
     """Fetch search results for a drug using Tavily API with caching.
     
