@@ -529,9 +529,6 @@ class AbstractExtractionWorkflow:
             self._extract_token_metadata(self._dc_validation_data)
             await self._save_result(input, "drug_class", "validation", self._dc_validation_data)
             self._output.drug_class.validation_results = self._dc_validation_data.get("results", [])
-
-            if self._dc_validation_data.get("errors"):
-                self._output.errors.extend(self._dc_validation_data["errors"])
         else:
             workflow.logger.info(
                 f"Skipping completed drug class validation for {input.abstract_id}"
@@ -714,44 +711,40 @@ class AbstractExtractionWorkflow:
             }
 
         results = []
-        errors = []
 
         for component, extraction_result in extraction_results.items():
             drug_classes = extraction_result.get("drug_classes", [])
             if not drug_classes or drug_classes == ["NA"]:
                 continue
-            try:
-                search_result = await workflow.execute_activity(
-                    step2_fetch_search_results,
-                    args=[component, input.firms, input.congress_id, input.abstract_id],
-                    task_queue=TaskQueues.DRUG_CLASS,
-                    start_to_close_timeout=Timeouts.SEARCH,
-                    retry_policy=RetryPolicies.SEARCH,
-                )
 
-                validation_result = await workflow.execute_activity(
-                    validate_drug_class_activity,
-                    DrugClassValidationInput(
-                        abstract_id=input.abstract_id,
-                        drug_name=component,
-                        abstract_title=input.abstract_title,
-                        full_abstract=input.full_abstract,
-                        search_results=search_result.get("drug_class_results", []),
-                        extraction_result=extraction_result,
-                        drug_selections=drug_selections,
-                        explicit_drug_classes=explicit_drug_classes,
-                        refined_explicit_drug_classes=refined_explicit_drug_classes,
-                    ),
-                    task_queue=TaskQueues.DRUG_CLASS,
-                    start_to_close_timeout=Timeouts.FAST_LLM,
-                    retry_policy=RetryPolicies.FAST_LLM,
-                )
-                self._extract_token_metadata(validation_result)
-                results.append({
-                    "drug_name": component, "validation": validation_result,
-                })
-            except Exception as e:
-                workflow.logger.error(f"Validation failed for drug '{component}': {e}")
-                errors.append(f"Validation error for {component}: {e}")
+            search_result = await workflow.execute_activity(
+                step2_fetch_search_results,
+                args=[component, input.firms, input.congress_id, input.abstract_id],
+                task_queue=TaskQueues.DRUG_CLASS,
+                start_to_close_timeout=Timeouts.SEARCH,
+                retry_policy=RetryPolicies.SEARCH,
+            )
 
-        return {"results": results, "errors": errors}
+            validation_result = await workflow.execute_activity(
+                validate_drug_class_activity,
+                DrugClassValidationInput(
+                    abstract_id=input.abstract_id,
+                    drug_name=component,
+                    abstract_title=input.abstract_title,
+                    full_abstract=input.full_abstract,
+                    search_results=search_result.get("drug_class_results", []),
+                    extraction_result=extraction_result,
+                    drug_selections=drug_selections,
+                    explicit_drug_classes=explicit_drug_classes,
+                    refined_explicit_drug_classes=refined_explicit_drug_classes,
+                ),
+                task_queue=TaskQueues.DRUG_CLASS,
+                start_to_close_timeout=Timeouts.FAST_LLM,
+                retry_policy=RetryPolicies.FAST_LLM,
+            )
+            self._extract_token_metadata(validation_result)
+            results.append({
+                "drug_name": component, "validation": validation_result,
+            })
+
+        return {"results": results}

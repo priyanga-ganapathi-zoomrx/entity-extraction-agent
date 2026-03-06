@@ -1,8 +1,12 @@
-"""Step 2 Search: Tavily search with global caching.
+"""Step 2 Search: Tavily search with congress-level caching.
 
 Handles drug class and firm searches via Tavily API.
-Results are cached globally at search_cache/{drug}.json to avoid
-duplicate requests for the same drug across different abstracts.
+Results are cached per congress at {drug}.json (relative to storage base_prefix)
+to avoid duplicate Tavily calls within the same congress while ensuring freshness
+across different congresses.
+
+Cache path (when called from Temporal activity):
+    congress/{congress_id}/search_cache/{drug}.json
 
 This module exports:
 - fetch_search_results(): Main entry point (cache-aware)
@@ -48,8 +52,8 @@ def _get_firms_key(firms: list[str]) -> str:
 
 
 def _get_cache_path(drug: str) -> str:
-    """Get cache file path for a drug."""
-    return f"search_cache/{_normalize_drug_name(drug)}.json"
+    """Get cache file path for a drug (relative to storage base_prefix)."""
+    return f"{_normalize_drug_name(drug)}.json"
 
 
 def load_search_cache(drug: str, storage: StorageClient) -> DrugSearchCache | None:

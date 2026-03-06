@@ -116,9 +116,9 @@ class DrugExtractionResult(BaseModel):
 
 
 class DrugSearchCache(BaseModel):
-    """Cached search results for a drug (global, shared across abstracts).
+    """Cached search results for a drug (per-congress, shared across abstracts).
     
-    Stored at: search_cache/{drug_normalized}.json
+    Stored at: congress/{congress_id}/search_cache/{drug_normalized}.json
     """
     drug: str = Field(..., description="Original drug name")
     fetched_at: str = Field(..., description="ISO timestamp when first fetched")
