@@ -105,6 +105,11 @@ class StepStatus:
         """Create a failed step status."""
         return cls(status="failed", error=error)
 
+    @classmethod
+    def skipped(cls) -> "StepStatus":
+        """Create a skipped step status (step intentionally bypassed)."""
+        return cls(status="skipped", llm_calls=0)
+
 
 @dataclass
 class PipelineMetrics:
@@ -231,7 +236,13 @@ class DrugClassPipelineStatus:
     
     def is_complete(self) -> bool:
         """Check if entire pipeline completed successfully."""
-        return self.is_steps1_3_done() and self.is_steps4_5_done() and self.is_validation_done()
+        steps1_3_done = self.is_steps1_3_done()
+        steps1_3_skipped = (
+            self.step1_regimen is not None and self.step1_regimen.status == "skipped"
+            and self.step2_extraction is not None and self.step2_extraction.status == "skipped"
+            and self.step3_selection is not None and self.step3_selection.status == "skipped"
+        )
+        return (steps1_3_done or steps1_3_skipped) and self.is_steps4_5_done() and self.is_validation_done()
 
 
 @dataclass

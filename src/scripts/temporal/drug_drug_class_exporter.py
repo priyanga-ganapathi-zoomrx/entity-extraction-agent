@@ -389,9 +389,9 @@ def transform_drug_class_validation(validation_data: dict) -> dict:
     missed_drug_classes = {}
 
     for entry in results:
-        drug_name = entry.get("drug_name", "")
+        drug_name = entry.get("drug_name", "") or "explicit_only"
         validation = entry.get("validation", {})
-        if drug_name and isinstance(validation, dict):
+        if isinstance(validation, dict):
             validation_status[drug_name] = validation.get("validation_status", "")
             validation_reasoning[drug_name] = validation.get("validation_reasoning", "")
             checks_performed[drug_name] = validation.get("checks_performed", {})

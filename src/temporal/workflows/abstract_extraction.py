@@ -133,10 +133,12 @@ class AbstractExtractionWorkflow:
                 if primary_drugs and self._status.should_run_drug_class_pipeline():
                     self._current_step = "drug_class_pipeline"
                     await self._run_drug_class_pipeline(input, primary_drugs)
+                elif not primary_drugs and self._status.should_run_drug_class_pipeline():
+                    self._current_step = "drug_class_explicit_only"
+                    await self._run_drug_class_explicit_only_pipeline(input)
                 elif not primary_drugs:
                     workflow.logger.info(
-                        f"No primary drugs for {input.abstract_id}, "
-                        "skipping drug class pipeline"
+                        f"Drug class explicit-only pipeline already complete for {input.abstract_id}"
                     )
                 else:
                     workflow.logger.info(
@@ -583,6 +585,131 @@ class AbstractExtractionWorkflow:
         workflow.logger.info(
             f"Drug class pipeline completed for {input.abstract_id}"
         )
+
+    async def _run_drug_class_explicit_only_pipeline(
+        self, input: AbstractExtractionInput
+    ) -> None:
+        """Run drug class pipeline with only explicit extraction + validation (no primary drugs)."""
+        workflow.logger.info(
+            f"Running explicit-only drug class pipeline for {input.abstract_id} (no primary drugs)"
+        )
+
+        # Mark steps 1-3 as skipped
+        self._status.drug_class.step1_regimen = StepStatus.skipped()
+        self._status.drug_class.step2_extraction = StepStatus.skipped()
+        self._status.drug_class.step3_selection = StepStatus.skipped()
+
+        # Step 4: Explicit extraction from title (reuses same checkpoint key)
+        step4 = await self._run_with_checkpoint(
+            input, "drug_class_step4", step4_explicit,
+            TaskQueues.DRUG_CLASS, Timeouts.FAST_LLM, RetryPolicies.FAST_LLM,
+            activity_input=ExplicitExtractionInput(
+                abstract_id=input.abstract_id,
+                abstract_title=input.abstract_title,
+            ),
+        )
+        self._status.drug_class.step4_explicit = step4.to_step_status()
+        if step4.status != "success":
+            self._output.errors.append(step4.error or "Drug class step 4 failed")
+            await self._save_status(input)
+            return
+
+        explicit = step4.output.get("explicit_drug_classes", [])
+        self._output.drug_class.explicit_classes = explicit
+
+        # Step 5: Skip consolidation (no drug_selections to consolidate with)
+        self._output.drug_class.refined_explicit_classes = explicit
+        self._status.drug_class.step5_consolidation = StepStatus.success(llm_calls=0)
+
+        # Step 6: Validation (always run, even if explicit == ["NA"], to confirm title has no drug classes)
+        validation_data = await self._run_drug_class_explicit_only_validation(
+            input, step4_output=step4.output
+        )
+        val_usage, val_calls = self._extract_token_metadata(validation_data)
+        self._output.drug_class.validation_results = validation_data.get("results", [])
+        if validation_data.get("errors"):
+            self._output.errors.extend(validation_data["errors"])
+            self._status.drug_class.validation = StepStatus.failed(
+                "; ".join(validation_data["errors"])
+            )
+        else:
+            self._status.drug_class.validation = StepStatus.success(
+                llm_calls=val_calls,
+                tokens=val_usage.get("total_tokens", 0) if val_usage else 0,
+                input_tokens=val_usage.get("input_tokens", 0) if val_usage else 0,
+                output_tokens=val_usage.get("output_tokens", 0) if val_usage else 0,
+            )
+
+        await self._save_status(input)
+        workflow.logger.info(
+            f"Explicit-only drug class pipeline completed for {input.abstract_id}"
+        )
+
+    async def _run_drug_class_explicit_only_validation(
+        self, input: AbstractExtractionInput, step4_output: dict
+    ) -> dict:
+        """Validate explicit-only drug class extraction (no primary drugs, no search results)."""
+        existing = await self._load_checkpoint(input, "drug_class_validation")
+        if existing is not None:
+            workflow.logger.info(
+                f"Loaded explicit-only validation from checkpoint for {input.abstract_id}"
+            )
+            return existing
+
+        explicit_classes = step4_output.get("explicit_drug_classes", [])
+        explicit_drug_classes = {
+            "drug_classes": explicit_classes,
+            "reasoning": step4_output.get("reasoning", ""),
+        }
+
+        results = []
+        errors = []
+        total_tokens = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+        total_llm_calls = 0
+
+        try:
+            validation_result = await workflow.execute_activity(
+                validate_drug_class_activity,
+                DrugClassValidationInput(
+                    abstract_id=input.abstract_id,
+                    drug_name="",
+                    abstract_title=input.abstract_title,
+                    full_abstract=input.full_abstract,
+                    search_results=[],
+                    extraction_result={
+                        "drug_classes": explicit_classes,
+                        "selected_sources": ["abstract_title"],
+                        "confidence_score": step4_output.get("confidence_score", 0.0),
+                        "reasoning": step4_output.get("reasoning", ""),
+                        "extraction_details": step4_output.get("extraction_details", []),
+                    },
+                    drug_selections=[],
+                    explicit_drug_classes=explicit_drug_classes,
+                    refined_explicit_drug_classes={},
+                ),
+                task_queue=TaskQueues.DRUG_CLASS,
+                start_to_close_timeout=Timeouts.FAST_LLM,
+                retry_policy=RetryPolicies.FAST_LLM,
+            )
+            v_usage, v_calls = self._extract_token_metadata(validation_result)
+            total_llm_calls += v_calls
+            if v_usage:
+                for k in total_tokens:
+                    total_tokens[k] += v_usage.get(k, 0)
+            results.append({
+                "drug_name": "",
+                "validation": validation_result,
+            })
+        except Exception as e:
+            workflow.logger.error(f"Explicit-only validation failed: {e}")
+            errors.append(f"Explicit-only validation error: {e}")
+
+        validation_data = {"results": results, "errors": errors}
+        if not errors:
+            await self._save_checkpoint(input, "drug_class_validation", validation_data)
+        validation_data["_token_usage"] = total_tokens
+        validation_data["_llm_calls"] = total_llm_calls
+        return validation_data
 
     async def _run_drug_class_steps1_3(
         self, input: AbstractExtractionInput, primary_drugs: list[str],

@@ -95,7 +95,9 @@ refined_explicit_drug_classes: {
 }
 ```
 
-**Note:** `refined_explicit_drug_classes` is only present when explicit drug classes were extracted from the title and a consolidation step was performed. Use this to validate the consolidation sub-checks within Check 4. If not present, skip those sub-checks.
+**Note:** `refined_explicit_drug_classes` is only present when explicit drug classes were extracted from the title and a consolidation step was performed. Use this to validate the consolidation sub-checks within Check 3 (Steps 10–15). If not present, skip those sub-checks. If `drug_classes` is `["NA"]` or empty, do not skip — perform Step 15 of Check 3 to re-examine the abstract title for any drug class misses per the extraction rules.
+
+**Important — Where title drug classes belong when `drug_classes` is `["NA"]` or empty:** The consolidation step (which produces `refined_explicit_drug_classes`) deduplicates explicit title classes against drug-specific selections. When `drug_classes` is `["NA"]` or empty, there are no drug-specific selections to deduplicate against, so consolidation should not have occurred. Any drug classes found in the abstract title in this scenario belong in `explicit_drug_classes` — **not** in `refined_explicit_drug_classes`. If valid title drug classes are missing from `explicit_drug_classes` in this case, flag them as an omission from `explicit_drug_classes`, not from `refined_explicit_drug_classes`.
 
 ### Consolidation Context (if applicable)
 
@@ -160,9 +162,10 @@ Perform each of these checks systematically, applying ALL rules from the referen
    - Understand what the rules say SHOULD be extracted
    - Understand what the rules say should NOT be extracted
 
-2. **Scan ALL sources for potential drug class terms:**
+2. **Scan ALL sources for potential drug class terms — including the abstract title:**
    - Look for any terms that could indicate a drug class (mechanism, therapeutic use, chemical family, mode of action, platform, etc.)
    - Note where each term appears (abstract_title, full_abstract, search_results)
+   - **Explicitly check the abstract title:** Re-read the abstract title text directly and identify any drug class terms present — this must be done independently of whether `selected_sources` includes `"abstract_title"`. Do not rely solely on search results for omission detection; the abstract title is a primary source and must be scanned for misses.
 
 3. **For each potential drug class found, apply ALL rules to determine if it SHOULD have been extracted:**
    - Apply the complete rule set from the reference document
@@ -300,6 +303,14 @@ Perform each of these checks systematically, applying ALL rules from the referen
     - If no explicit classes remain after consolidation, result should be `["NA"]`
     - The `removed_classes` array accurately reflects what was removed and why
 
+15. **If `refined_explicit_drug_classes` is `["NA"]` or empty — re-check the abstract title for missed drug classes:**
+    - When the refined explicit drug classes result is empty, do not assume the title contained nothing extractable. Re-examine the abstract title directly.
+    - Apply all title extraction rules (Steps 1–9) to the abstract title text to identify any explicit, standalone drug classes that should have been captured but were not.
+    - Verify that any class present in `removed_classes` was correctly removed per the consolidation rules — if a class was removed incorrectly and nothing remains, that is an error.
+    - If a valid, standalone drug class is found in the abstract title that was neither extracted nor accounted for in the consolidation step, flag it as an omission.
+    - Only confirm `["NA"]` as correct if the title genuinely contains no extractable, standalone drug class per the extraction rules.
+    - **Special case — when `drug_classes` is `["NA"]` or empty:** If no drug-specific classes were extracted (i.e., `drug_classes` is `["NA"]` or `[]`), the consolidation step should not have been performed. Any valid drug class present in the abstract title in this scenario belongs in `explicit_drug_classes`, not in `refined_explicit_drug_classes`. Flag any valid title drug classes as missing from `explicit_drug_classes` — do not flag them as missing from `refined_explicit_drug_classes`.
+
 **Flag as Title Extraction Violation:**
 - Drug class inferred from drug name rather than explicitly stated
 - Drug class syntactically bound to a drug name but extracted as standalone
@@ -386,6 +397,13 @@ If `drug_classes` is `["NA"]` or `[]`, perform omission detection to verify this
 2. Apply ALL rules from the reference document to determine if any class SHOULD have been extracted
 3. If missed classes are found in original sources, add them to `missed_drug_classes` array and flag as omission
 4. If no drug class indicators exist in sources, confirm the ["NA"] result is correct
+
+**Title drug classes when `drug_classes` is `["NA"]` or empty:**
+
+When `drug_classes` is `["NA"]` or `[]`, the consolidation step should not have been performed — there are no drug-specific selections to deduplicate against. In this scenario:
+- Any drug class present in the abstract title belongs in `explicit_drug_classes`, **not** in `refined_explicit_drug_classes`
+- If valid title drug classes are absent from `explicit_drug_classes`, flag them as missing from `explicit_drug_classes`
+- Do **not** flag these as missing from `refined_explicit_drug_classes` — that output is only valid when drug-specific selections exist
 
 ### Multiple Drugs
 If multiple drugs are present, validate each drug's extraction independently.
