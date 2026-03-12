@@ -27,6 +27,7 @@ import asyncio
 from typing import Optional
 
 from temporalio import workflow
+from temporalio.exceptions import is_cancelled_exception
 
 with workflow.unsafe.imports_passed_through():
     from src.temporal.config import (
@@ -144,107 +145,129 @@ class AbstractExtractionWorkflow:
             f"(entity: {input.entity}, batch: {input.batch_id})"
         )
 
-        while True:
-            self._current_status = "running"
+        try:
+            while True:
+                self._current_status = "running"
 
-            try:
-                if input.entity == "drug":
-                    if "drug_pipeline" not in self._completed_steps:
-                        self._current_entity = "drug"
-                        await self._update_progress(input, "drug", "running")
-                        await self._run_drug_pipeline(input)
-                        await self._update_progress(input, "drug", "success")
-                        self._completed_steps.add("drug_pipeline")
-                    else:
-                        workflow.logger.info(
-                            f"Skipping already completed drug pipeline for {input.abstract_id}"
-                        )
-
-                    self._current_entity = "drug_class"
-                    primary_drugs = self._output.drug.extraction.get("primary_drugs", [])
-                    if primary_drugs:
-                        if "drug_class_pipeline" not in self._completed_steps:
-                            await self._update_progress(input, "drug_class", "running")
-                            await self._run_drug_class_pipeline(input, primary_drugs)
-                            await self._update_progress(input, "drug_class", "success")
-                            self._completed_steps.add("drug_class_pipeline")
+                try:
+                    if input.entity == "drug":
+                        if "drug_pipeline" not in self._completed_steps:
+                            self._current_entity = "drug"
+                            await self._update_progress(input, "drug", "running")
+                            await self._run_drug_pipeline(input)
+                            await self._update_progress(input, "drug", "success")
+                            self._completed_steps.add("drug_pipeline")
                         else:
                             workflow.logger.info(
-                                f"Skipping already completed drug class pipeline for {input.abstract_id}"
+                                f"Skipping already completed drug pipeline for {input.abstract_id}"
                             )
+
+                        self._current_entity = "drug_class"
+                        primary_drugs = self._output.drug.extraction.get("primary_drugs", [])
+                        if primary_drugs:
+                            if "drug_class_pipeline" not in self._completed_steps:
+                                await self._update_progress(input, "drug_class", "running")
+                                await self._run_drug_class_pipeline(input, primary_drugs)
+                                await self._update_progress(input, "drug_class", "success")
+                                self._completed_steps.add("drug_class_pipeline")
+                            else:
+                                workflow.logger.info(
+                                    f"Skipping already completed drug class pipeline for {input.abstract_id}"
+                                )
+                        else:
+                            workflow.logger.info(
+                                f"No primary drugs for {input.abstract_id}, "
+                                "skipping drug class pipeline"
+                            )
+                            await self._update_progress(input, "drug_class", "success")
+
+                    elif input.entity == "indication":
+                        if "indication_pipeline" not in self._completed_steps:
+                            self._current_entity = "indication"
+                            await self._update_progress(input, "indication", "running")
+                            await self._run_indication_pipeline(input)
+                            await self._update_progress(input, "indication", "success")
+                            self._completed_steps.add("indication_pipeline")
+                        else:
+                            workflow.logger.info(
+                                f"Skipping already completed indication pipeline for {input.abstract_id}"
+                            )
+
                     else:
-                        workflow.logger.info(
-                            f"No primary drugs for {input.abstract_id}, "
-                            "skipping drug class pipeline"
-                        )
-                        await self._update_progress(input, "drug_class", "success")
+                        raise ValueError(f"Unknown entity type: {input.entity}")
 
-                elif input.entity == "indication":
-                    if "indication_pipeline" not in self._completed_steps:
-                        self._current_entity = "indication"
-                        await self._update_progress(input, "indication", "running")
-                        await self._run_indication_pipeline(input)
-                        await self._update_progress(input, "indication", "success")
-                        self._completed_steps.add("indication_pipeline")
-                    else:
-                        workflow.logger.info(
-                            f"Skipping already completed indication pipeline for {input.abstract_id}"
-                        )
-
-                else:
-                    raise ValueError(f"Unknown entity type: {input.entity}")
-
-                # Pipeline completed successfully
-                self._output.completed = True
-                self._current_status = "success"
-                workflow.logger.info(
-                    f"Entity workflow completed for {input.abstract_id} "
-                    f"(entity: {input.entity})"
-                )
-                return self._output
-
-            except asyncio.CancelledError:
-                self._current_status = "aborted"
-                self._update_progress_on_abort(input)
-                raise
-
-            except Exception as e:
-                workflow.logger.error(
-                    f"Pipeline failed for {input.abstract_id} "
-                    f"(entity: {input.entity}): {e}"
-                )
-                self._output.errors.append(str(e))
-                self._current_status = "failed"
-                self._update_progress_on_failure(input)
-
-                # Pause — wait for admin to send retry or abort signal
-                workflow.logger.info(
-                    f"Workflow paused for {input.abstract_id}, "
-                    "waiting for retry or abort signal"
-                )
-                self._retry_requested = False
-                self._abort_requested = False
-                await workflow.wait_condition(
-                    lambda: self._retry_requested or self._abort_requested
-                )
-
-                if self._abort_requested:
-                    self._current_status = "aborted"
-                    self._update_progress_on_abort(input)
+                    # Pipeline completed successfully
+                    self._output.completed = True
+                    self._current_status = "success"
                     workflow.logger.info(
-                        f"Abort signal received for {input.abstract_id}"
+                        f"Entity workflow completed for {input.abstract_id} "
+                        f"(entity: {input.entity})"
                     )
                     return self._output
 
-                # Retry signal received — clear errors and loop back.
-                # Each pipeline method checks self._output and
-                # self._completed_steps to skip already-completed work.
-                workflow.logger.info(
-                    f"Retry signal received for {input.abstract_id}, "
-                    "resuming pipeline from failed step"
+                except Exception as e:
+                    # Activity cancellation arrives as ActivityError wrapping
+                    # temporalio.exceptions.CancelledError (an Exception subclass,
+                    # NOT asyncio.CancelledError).  Convert to asyncio.CancelledError
+                    # so the outer handler catches it and runs shielded cleanup.
+                    if is_cancelled_exception(e):
+                        raise asyncio.CancelledError() from e
+
+                    workflow.logger.error(
+                        f"Pipeline failed for {input.abstract_id} "
+                        f"(entity: {input.entity}): {e}"
+                    )
+                    self._output.errors.append(str(e))
+                    self._current_status = "failed"
+                    self._update_progress_on_failure(input)
+
+                    # Pause — wait for admin to send retry or abort signal
+                    workflow.logger.info(
+                        f"Workflow paused for {input.abstract_id}, "
+                        "waiting for retry or abort signal"
+                    )
+                    self._retry_requested = False
+                    self._abort_requested = False
+                    await workflow.wait_condition(
+                        lambda: self._retry_requested or self._abort_requested
+                    )
+
+                    if self._abort_requested:
+                        self._current_status = "aborted"
+                        self._update_progress_on_abort(input)
+                        workflow.logger.info(
+                            f"Abort signal received for {input.abstract_id}"
+                        )
+                        return self._output
+
+                    # Retry signal received — clear errors and loop back.
+                    # Each pipeline method checks self._output and
+                    # self._completed_steps to skip already-completed work.
+                    workflow.logger.info(
+                        f"Retry signal received for {input.abstract_id}, "
+                        "resuming pipeline from failed step"
+                    )
+                    self._retry_requested = False
+                    self._output.errors.clear()
+
+        except asyncio.CancelledError:
+            self._current_status = "aborted"
+            await asyncio.shield(
+                workflow.execute_activity(
+                    update_extraction_progress,
+                    args=[
+                        input.batch_id,
+                        input.congress_id,
+                        input.abstract_id,
+                        self._current_entity or input.entity,
+                        "aborted",
+                    ],
+                    task_queue=TaskQueues.ENTITY_MAPPING_PROGRESS,
+                    start_to_close_timeout=Timeouts.ENTITY_MAPPING_PROGRESS,
+                    retry_policy=RetryPolicies.ENTITY_MAPPING_PROGRESS,
                 )
-                self._retry_requested = False
-                self._output.errors.clear()
+            )
+            raise
 
     # =========================================================================
     # PROGRESS HELPERS
