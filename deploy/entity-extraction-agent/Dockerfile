@@ -1,24 +1,28 @@
+# Use congress-core-utils as base image
 ARG PROJECT_ID
 ARG ENV
-FROM us-docker.pkg.dev/${PROJECT_ID}/${ENV}/python/3.11:latest
-LABEL maintainer="ZoomRx"
-RUN sudo apt-get --allow-releaseinfo-change update;
+FROM us-docker.pkg.dev/${PROJECT_ID}/${ENV}/core-utils:latest
 
+# maintainer info
+LABEL maintainer="FERMA"
+
+# Install uv (fast Python package installer)
+RUN sudo apt-get --allow-releaseinfo-change update;
+RUN curl -LsSf https://astral.sh/uv/0.9.22/install.sh | sh
+
+# Add uv to PATH
+ENV PATH="/home/ferma/.local/bin:${PATH}"
+
+# ======================================
+# Copy stage - application
+# ======================================
 RUN mkdir -p /app/entity-extraction-agent
 COPY . /app/entity-extraction-agent
 WORKDIR /app/entity-extraction-agent
+
+# Give ownership to ferma user
 RUN sudo chown -R ferma:ferma /app
 
-# Create venv
-RUN python -m venv /app/venv
-
-# Install pip and poetry
-RUN /app/venv/bin/pip install --upgrade pip
-RUN /app/venv/bin/pip install poetry
-
-# Configure poetry to use existing venv instead of creating its own
-ENV VIRTUAL_ENV=/app/venv
-ENV PATH="/app/venv/bin:$PATH"
-
-RUN poetry config virtualenvs.create false
-RUN poetry install --no-interaction --no-ansi --no-root
+# Create virtual environment and install dependencies from pyproject.toml
+RUN uv venv
+RUN uv sync

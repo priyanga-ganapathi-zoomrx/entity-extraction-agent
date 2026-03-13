@@ -55,3 +55,4 @@ htmlcov/
 *.png
 *.jpg
 *.jpeg
+.venv

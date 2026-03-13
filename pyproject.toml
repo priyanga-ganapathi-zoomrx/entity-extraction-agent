@@ -1,42 +1,35 @@
-[tool.poetry]
-name = "indication-extraction-agent"
+[project]
+name = "entity-extraction-agent"
 version = "0.1.0"
-description = "A Python project for indication extraction with LangGraph and Langfuse"
-authors = ["Your Name <your.email@example.com>"]
+description = "A Python project for entity extraction with LangGraph and Langfuse"
 readme = "README.md"
-license = "MIT"
+requires-python = "~=3.11.0"
+dependencies = [
+    "cgutils[mysql]",
+    "langchain~=1.0.3",
+    "langchain-core~=1.0.3",
+    "langchain-openai~=1.0.2",
+    "langchain-anthropic~=1.0.1",
+    "langchain-google-genai~=3.0.1",
+    "langgraph~=1.0.2",
+    "langfuse~=3.2.7",
+    "httpx[http2]~=0.28.1",
+    "python-dotenv~=1.0.0",
+    "tavily-python~=0.7.13",
+    "litellm~=1.80.11",
+    "google-cloud-storage~=3.8.0",
+    "pandas~=2.2.0",
+    "openpyxl~=3.1.0",
+    "tqdm~=4.66.0",
+    "tenacity~=8.2.0",
+    "temporalio~=1.9.0",
+    "structlog~=25.5.0",
+    "ecs-logging~=2.3.0",
+    "google-cloud-pubsub~=2.35.0",
+]
 
-[tool.poetry.dependencies]
-python = "^3.11"
-langchain = "^1.0.3"
-langchain-core = "^1.0.3"
-langchain-openai = "^1.0.2"
-langchain-anthropic = "^1.0.1"
-langchain-google-genai = "^3.0.1"
-langgraph = "^1.0.2"
-langfuse = "^3.2.7"
-pydantic = "^2.11.3"
-pydantic-settings = "^2.9.1"
-httpx = {extras = ["http2"], version = "^0.28.1"}
-python-dotenv = "^1.0.0"
-tavily-python = "^0.7.13"
-litellm = "^1.80.11"
-google-cloud-storage = "^3.8.0"
-pandas = "^2.2.0"
-openpyxl = "^3.1.0"
-tqdm = "^4.66.0"
-tenacity = "^8.2.0"
-temporalio = "^1.9.0"
-sentry-sdk = "^2.52.0"
-structlog = "^25.5.0"
-ecs-logging = "^2.3.0"
-google-cloud-pubsub = "^2.35.0"
-sqlalchemy = "^2.0.48"
-pymysql = "^1.1.2"
-
-[build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+[tool.uv.sources]
+cgutils = { path = "../congress-core-utils" }
 
 [tool.black]
 line-length = 88
