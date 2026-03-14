@@ -46,6 +46,10 @@ class StorageClient(Protocol):
         """Upload text content to storage."""
         ...
     
+    def upload_bytes(self, path: str, data: bytes, content_type: str = "application/octet-stream") -> None:
+        """Upload binary data to storage."""
+        ...
+
     def exists(self, path: str) -> bool:
         """Check if path exists in storage."""
         ...
@@ -87,6 +91,13 @@ class LocalStorageClient:
         with open(file_path, 'w', encoding='utf-8-sig', newline='') as f:
             f.write(content)
     
+    def upload_bytes(self, path: str, data: bytes, content_type: str = "application/octet-stream") -> None:
+        """Upload binary data to local filesystem."""
+        file_path = self._get_path(path)
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(file_path, 'wb') as f:
+            f.write(data)
+
     def exists(self, path: str) -> bool:
         """Check if path exists in local filesystem."""
         return self._get_path(path).exists()
@@ -176,6 +187,11 @@ class GCSStorageClient:
         blob = self.bucket.blob(self._get_blob_path(path))
         blob.upload_from_string(content, content_type="text/plain; charset=utf-8")
     
+    def upload_bytes(self, path: str, data: bytes, content_type: str = "application/octet-stream") -> None:
+        """Upload binary data to GCS."""
+        blob = self.bucket.blob(self._get_blob_path(path))
+        blob.upload_from_string(data, content_type=content_type)
+
     def exists(self, path: str) -> bool:
         """Check if object exists in GCS."""
         blob = self.bucket.blob(self._get_blob_path(path))

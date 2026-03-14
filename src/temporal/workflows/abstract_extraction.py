@@ -43,6 +43,8 @@ with workflow.unsafe.imports_passed_through():
     from src.temporal.activities.result_storage import save_step_output
     # Extraction progress activity (SQL stub)
     from src.temporal.activities.extraction_progress import update_extraction_progress
+    # Batch finalization
+    from src.temporal.activities.check_and_finalize_batch import CheckAndFinalizeInput
     # Drug activities + schemas
     from src.agents.drug.schemas import (
         DrugInput,
@@ -147,6 +149,16 @@ class AbstractExtractionWorkflow:
 
         try:
             await self._execute_pipeline(input)
+            # Check if batch is done and finalize (update status, generate XLSX)
+            await workflow.execute_activity(
+                "check_and_finalize_batch",
+                CheckAndFinalizeInput(
+                    batch_id=input.batch_id, congress_id=input.congress_id
+                ),
+                task_queue=TaskQueues.RESULT_STORAGE,
+                start_to_close_timeout=Timeouts.BATCH_FINALIZATION,
+                retry_policy=RetryPolicies.BATCH_FINALIZATION,
+            )
             return self._output
         except asyncio.CancelledError:
             self._current_status = "aborted"
@@ -230,7 +242,25 @@ class AbstractExtractionWorkflow:
                 )
                 self._output.errors.append(str(e))
                 self._current_status = "failed"
-                self._update_progress_on_failure(input)
+                # Blocking await so DB is up-to-date before check_and_finalize
+                entity = self._current_entity or input.entity
+                await workflow.execute_activity(
+                    update_extraction_progress,
+                    args=[input.batch_id, input.congress_id, input.abstract_id, entity, "failed"],
+                    task_queue=TaskQueues.ENTITY_MAPPING_PROGRESS,
+                    start_to_close_timeout=Timeouts.ENTITY_MAPPING_PROGRESS,
+                    retry_policy=RetryPolicies.ENTITY_MAPPING_PROGRESS,
+                )
+                # Check if batch is done and finalize
+                await workflow.execute_activity(
+                    "check_and_finalize_batch",
+                    CheckAndFinalizeInput(
+                        batch_id=input.batch_id, congress_id=input.congress_id
+                    ),
+                    task_queue=TaskQueues.RESULT_STORAGE,
+                    start_to_close_timeout=Timeouts.BATCH_FINALIZATION,
+                    retry_policy=RetryPolicies.BATCH_FINALIZATION,
+                )
 
                 # Pause — wait for admin to send retry or abort signal
                 workflow.logger.info(
@@ -258,6 +288,17 @@ class AbstractExtractionWorkflow:
                         task_queue=TaskQueues.ENTITY_MAPPING_PROGRESS,
                         start_to_close_timeout=Timeouts.ENTITY_MAPPING_PROGRESS,
                         retry_policy=RetryPolicies.ENTITY_MAPPING_PROGRESS,
+                    )
+                    # Defensive: check batch finalization (likely no-op since
+                    # AP server already set batch status to 'aborted')
+                    workflow.start_activity(
+                        "check_and_finalize_batch",
+                        CheckAndFinalizeInput(
+                            batch_id=input.batch_id, congress_id=input.congress_id
+                        ),
+                        task_queue=TaskQueues.RESULT_STORAGE,
+                        start_to_close_timeout=Timeouts.BATCH_FINALIZATION,
+                        retry_policy=RetryPolicies.BATCH_FINALIZATION,
                     )
                     workflow.logger.info(
                         f"Abort signal received for {input.abstract_id}"
@@ -321,21 +362,6 @@ class AbstractExtractionWorkflow:
         await workflow.execute_activity(
             update_extraction_progress,
             args=[input.batch_id, input.congress_id, input.abstract_id, entity, status],
-            task_queue=TaskQueues.ENTITY_MAPPING_PROGRESS,
-            start_to_close_timeout=Timeouts.ENTITY_MAPPING_PROGRESS,
-            retry_policy=RetryPolicies.ENTITY_MAPPING_PROGRESS,
-        )
-
-    def _update_progress_on_failure(self, input: AbstractExtractionInput) -> None:
-        """Fire-and-forget progress update on pipeline failure.
-
-        Uses _current_entity to mark only the entity that actually failed,
-        avoiding overwriting an earlier success for a different sub-entity.
-        """
-        entity = self._current_entity or input.entity
-        workflow.start_activity(
-            update_extraction_progress,
-            args=[input.batch_id, input.congress_id, input.abstract_id, entity, "failed"],
             task_queue=TaskQueues.ENTITY_MAPPING_PROGRESS,
             start_to_close_timeout=Timeouts.ENTITY_MAPPING_PROGRESS,
             retry_policy=RetryPolicies.ENTITY_MAPPING_PROGRESS,

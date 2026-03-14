@@ -98,6 +98,10 @@ class Timeouts:
     # Search activities - Tavily API (typically 2-10s)
     SEARCH = timedelta(seconds=45)
     
+    # Batch finalization — reads step JSONs from GCS for all sessions in batch,
+    # generates XLSX. drug_class with 20k sessions = ~120k GCS reads (~50 min).
+    BATCH_FINALIZATION = timedelta(minutes=60)
+
     # Workflow execution timeout — entity workflows can pause for days waiting
     # for a retry signal, so this must be long.
     WORKFLOW_EXECUTION = timedelta(hours=72)
@@ -169,6 +173,17 @@ class RetryPolicies:
         ],
     )
     
+    # Batch finalization — GCS reads + XLSX generation + upload
+    BATCH_FINALIZATION = RetryPolicy(
+        initial_interval=timedelta(seconds=10),
+        backoff_coefficient=2.0,
+        maximum_interval=timedelta(minutes=2),
+        maximum_attempts=3,
+        non_retryable_error_types=[
+            "ValueError",
+        ],
+    )
+
     # Search activities - quick retries for rate limits
     SEARCH = RetryPolicy(
         initial_interval=timedelta(seconds=2),
