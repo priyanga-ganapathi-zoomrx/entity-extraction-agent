@@ -16,10 +16,12 @@ from temporalio import activity
 from src.agents.core.config import settings
 from src.agents.core.storage import GCSStorageClient
 from src.db import (
+    Congresses,
     EntityMappingBatches,
     EntityMappingBatchesSessions,
     EntityMappingSessions,
     Sessions,
+    Users,
     get_session,
 )
 from src.temporal.utils.entity_mapping_export import generate_entity_xlsx
@@ -96,11 +98,18 @@ def check_and_finalize_batch(input: CheckAndFinalizeInput) -> None:
         else:
             final_status = "failed"
 
-        # ── Step 4: Update batch in DB ──
+        # ── Step 4: Update batch in DB (atomic: only if still 'running') ──
         now = datetime.now(timezone.utc)
-        db.query(EntityMappingBatches).filter_by(id=batch_id).update(
-            {"status": final_status, "completed_at": now}
-        )
+        rows_updated = db.query(EntityMappingBatches).filter_by(
+            id=batch_id, status="running"
+        ).update({"status": final_status, "completed_at": now})
+
+        if rows_updated == 0:
+            activity.logger.info(
+                f"Batch {batch_id} already finalized by another activity, skipping"
+            )
+            return
+
         activity.logger.info(
             f"Batch {batch_id} finalized as '{final_status}'"
         )
@@ -108,23 +117,46 @@ def check_and_finalize_batch(input: CheckAndFinalizeInput) -> None:
         # Read entities while session is still open (avoids DetachedInstanceError)
         entities = batch.entities or []
 
+        # ── Step 4b: Gather notification data (while session is open) ──
+        congress_row = db.query(Congresses.name).filter_by(id=congress_id).first()
+        congress_name = congress_row.name if congress_row else f"Congress {congress_id}"
+
+        triggered_by_name = None
+        if batch.triggered_by_id:
+            user_row = db.query(Users.first_name, Users.last_name).filter_by(id=batch.triggered_by_id).first()
+            if user_row:
+                triggered_by_name = f"{user_row.first_name} {user_row.last_name}".strip()
+
+        batch_created_at = batch.created_at
+
     # ── Step 5: Skip XLSX if no successful sessions ──
     if final_status in ("failed", "aborted"):
         activity.logger.info(
             f"Batch {batch_id} is '{final_status}', skipping XLSX generation"
         )
-        return
+    else:
+        # ── Step 6: Generate XLSX files ──
+        storage = GCSStorageClient(settings.gcs.GCS_BUCKET_NAME)
 
-    # ── Step 6: Generate XLSX files ──
-    storage = GCSStorageClient(settings.gcs.GCS_BUCKET_NAME)
+        for entity in entities:
+            _generate_batch_xlsx(storage, congress_id, batch_id, entity)
+            _generate_congress_xlsx(storage, congress_id, entity)
 
-    for entity in entities:
-        _generate_batch_xlsx(storage, congress_id, batch_id, entity)
-        _generate_congress_xlsx(storage, congress_id, entity)
+        activity.logger.info(
+            f"Batch {batch_id}: XLSX generation complete for entities={entities}"
+        )
 
-    activity.logger.info(
-        f"Batch {batch_id}: XLSX generation complete for entities={entities}"
-    )
+    # ── Step 7: Send Teams notification (after XLSX generation) ──
+    try:
+        _send_batch_notification(
+            congress_name, batch_id, final_status, entities, batch_sessions,
+            triggered_by_name, batch_created_at, now,
+        )
+    except Exception:
+        activity.logger.warning(
+            f"Batch {batch_id}: Teams notification failed, continuing",
+            exc_info=True,
+        )
 
 
 def _generate_batch_xlsx(
@@ -221,3 +253,53 @@ def _get_session_info(db, session_ids: list[int]) -> dict[int, dict[str, str]]:
         s.id: {"title": s.title or "", "abstract": s.abstract or ""}
         for s in sessions
     }
+
+
+def _send_batch_notification(
+    congress_name: str,
+    batch_id: int,
+    final_status: str,
+    entities: list[str],
+    batch_sessions: list,
+    triggered_by: str | None,
+    created_at: datetime | None,
+    completed_at: datetime,
+) -> None:
+    """Build and send Teams notification for batch finalization."""
+    from src.temporal.utils.teams_notify import format_facts, send_teams_message
+
+    entity_counts: dict[str, dict[str, int]] = {}
+    for row in batch_sessions:
+        counts = entity_counts.setdefault(row.entity, {"success": 0, "failed": 0, "aborted": 0})
+        if row.status in counts:
+            counts[row.status] += 1
+
+    total = len(batch_sessions)
+    status_emoji = {"completed": "✅", "partial": "⚠️", "failed": "❌", "aborted": "🚫"}
+    emoji = status_emoji.get(final_status, "ℹ️")
+
+    title = f"{emoji} Entity Extraction — Batch {batch_id} {final_status.upper()}"
+
+    data = {
+        "Congress": congress_name,
+        "Batch ID": str(batch_id),
+        "Status": final_status,
+        "Total Sessions": str(total),
+    }
+
+    if triggered_by:
+        data["Triggered By"] = triggered_by
+
+    if created_at:
+        # MySQL TIMESTAMP is naive UTC; completed_at is aware UTC — normalize
+        completed_naive = completed_at.replace(tzinfo=None)
+        duration = completed_naive - created_at
+        mins, secs = divmod(int(duration.total_seconds()), 60)
+        data["Duration"] = f"{mins}m {secs}s"
+
+    for entity in entities:
+        counts = entity_counts.get(entity, {})
+        s, f, a = counts.get("success", 0), counts.get("failed", 0), counts.get("aborted", 0)
+        data[entity.replace("_", " ").title()] = f"✅ {s}  ❌ {f}  🚫 {a}"
+
+    send_teams_message(title, format_facts(data))

@@ -101,3 +101,22 @@ class Sessions(Base):
     title = Column(String(1000))
     abstract = Column(String(5000))
     full_abstract_text = Column(LONGTEXT, nullable=True)
+
+
+class Congresses(Base):
+    """Read-only model for the congresses table (owned by AP server)."""
+
+    __tablename__ = "congresses"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(200))
+
+
+class Users(Base):
+    """Read-only model for the users table (owned by AP server)."""
+
+    __tablename__ = "users"
+
+    id = Column(String(200), primary_key=True, index=True)
+    first_name = Column(String(200))
+    last_name = Column(String(200))
