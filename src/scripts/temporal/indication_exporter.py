@@ -3,7 +3,7 @@
 
 Reads Temporal workflow output files (indication_extraction.json,
 indication_validation.json) and combines them with input CSV data
-into a single QA CSV.
+into a single QA XLSX.
 
 Output columns match the step-centric indication validation_processor.py
 (save_results_csv) for consistency.
@@ -13,19 +13,19 @@ Usage:
     python -m src.scripts.temporal.indication_exporter \
         --input data/abstract_titles.csv \
         --data_dir data/output \
-        --output indication_export.csv
+        --output indication_export.xlsx
 
     # GCS storage
     python -m src.scripts.temporal.indication_exporter \
         --input gs://bucket/Conference/abstract_titles.csv \
         --data_dir gs://bucket/Conference \
-        --output gs://bucket/Conference/indication_export.csv
+        --output gs://bucket/Conference/indication_export.xlsx
 
     # With limit
     python -m src.scripts.temporal.indication_exporter \
         --input data/abstract_titles.csv \
         --data_dir data/output \
-        --output indication_export.csv \
+        --output indication_export.xlsx \
         --limit 100
 """
 
@@ -35,7 +35,7 @@ from datetime import datetime
 from tqdm import tqdm
 
 from src.scripts.temporal.utils import (
-    export_csv,
+    export_xlsx,
     get_abstract_id_column,
     get_data_storage,
     get_input_storage_and_filename,
@@ -210,13 +210,13 @@ Examples:
     python -m src.scripts.temporal.indication_exporter \\
         --input data/abstract_titles.csv \\
         --data_dir data/output \\
-        --output indication_export.csv
+        --output indication_export.xlsx
 
     # GCS storage
     python -m src.scripts.temporal.indication_exporter \\
         --input gs://bucket/Conference/abstract_titles.csv \\
         --data_dir gs://bucket/Conference \\
-        --output gs://bucket/Conference/indication_export.csv
+        --output gs://bucket/Conference/indication_export.xlsx
         """,
     )
 
@@ -233,7 +233,7 @@ Examples:
     parser.add_argument(
         "--output",
         default=None,
-        help="Output CSV file path (local or gs://). Default: indication_export_<timestamp>.csv",
+        help="Output XLSX file path (local or gs://). Default: indication_export_<timestamp>.xlsx",
     )
     parser.add_argument(
         "--limit",
@@ -247,7 +247,7 @@ Examples:
     # Default output filename with timestamp
     if not args.output:
         timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-        args.output = f"indication_export_{timestamp}.csv"
+        args.output = f"indication_export_{timestamp}.xlsx"
 
     print("Indication Extraction & Validation Exporter")
     print("=" * 60)
@@ -277,8 +277,8 @@ Examples:
     # Build output fieldnames
     output_fieldnames = fieldnames + EXTRACTION_COLUMNS + VALIDATION_COLUMNS
 
-    # Export CSV
-    export_csv(output_rows, output_fieldnames, args.output)
+    # Export XLSX
+    export_xlsx(output_rows, output_fieldnames, args.output)
 
     print(f"\nDone. Exported {len(output_rows)} rows.")
 

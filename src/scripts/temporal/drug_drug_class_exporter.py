@@ -2,7 +2,7 @@
 """Combined Drug and Drug Class QA Exporter for Temporal Workflow Outputs.
 
 Reads Temporal workflow output files and combines them with input CSV data
-into a single CSV for QA review.
+into a single XLSX for QA review.
 
 Output columns match the step-centric drug_drug_class_exporter.py for
 consistency. Key difference: reads from a single unified data directory
@@ -21,19 +21,19 @@ Usage:
     python -m src.scripts.temporal.drug_drug_class_exporter \
         --input data/abstract_titles.csv \
         --data_dir data/output \
-        --output drug_drug_class_export.csv
+        --output drug_drug_class_export.xlsx
 
     # GCS storage
     python -m src.scripts.temporal.drug_drug_class_exporter \
         --input gs://bucket/Conference/abstract_titles.csv \
         --data_dir gs://bucket/Conference \
-        --output gs://bucket/Conference/drug_drug_class_export.csv
+        --output gs://bucket/Conference/drug_drug_class_export.xlsx
 
     # With limit
     python -m src.scripts.temporal.drug_drug_class_exporter \
         --input data/abstract_titles.csv \
         --data_dir data/output \
-        --output drug_drug_class_export.csv \
+        --output drug_drug_class_export.xlsx \
         --limit 10
 """
 
@@ -43,7 +43,7 @@ from datetime import datetime
 from tqdm import tqdm
 
 from src.scripts.temporal.utils import (
-    export_csv,
+    export_xlsx,
     extract_combined_drug_classes,
     format_dict_as_key_value,
     format_dict_as_key_value_skip_empty,
@@ -570,13 +570,13 @@ Examples:
     python -m src.scripts.temporal.drug_drug_class_exporter \\
         --input data/abstract_titles.csv \\
         --data_dir data/output \\
-        --output drug_drug_class_export.csv
+        --output drug_drug_class_export.xlsx
 
     # GCS storage
     python -m src.scripts.temporal.drug_drug_class_exporter \\
         --input gs://bucket/Conference/abstract_titles.csv \\
         --data_dir gs://bucket/Conference \\
-        --output gs://bucket/Conference/drug_drug_class_export.csv
+        --output gs://bucket/Conference/drug_drug_class_export.xlsx
         """,
     )
 
@@ -593,7 +593,7 @@ Examples:
     parser.add_argument(
         "--output",
         default=None,
-        help="Output CSV file path (local or gs://). Default: drug_drug_class_export_<timestamp>.csv",
+        help="Output XLSX file path (local or gs://). Default: drug_drug_class_export_<timestamp>.xlsx",
     )
     parser.add_argument(
         "--limit",
@@ -607,7 +607,7 @@ Examples:
     # Default output filename with timestamp
     if not args.output:
         timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-        args.output = f"drug_drug_class_export_{timestamp}.csv"
+        args.output = f"drug_drug_class_export_{timestamp}.xlsx"
 
     print("Combined Drug & Drug Class QA Exporter (Temporal)")
     print("=" * 60)
@@ -637,8 +637,8 @@ Examples:
     # Build output fieldnames
     output_fieldnames = fieldnames + NEW_COLUMNS
 
-    # Export CSV
-    export_csv(output_rows, output_fieldnames, args.output)
+    # Export XLSX
+    export_xlsx(output_rows, output_fieldnames, args.output)
 
     print(f"\nDone. Exported {len(output_rows)} rows.")
 
