@@ -251,6 +251,20 @@ class AbstractExtractionWorkflow:
                     start_to_close_timeout=Timeouts.ENTITY_MAPPING_PROGRESS,
                     retry_policy=RetryPolicies.ENTITY_MAPPING_PROGRESS,
                 )
+                # If drug pipeline failed, also mark drug_class as failed
+                # so batch finalization isn't blocked by a "pending" drug_class
+                if (
+                    input.entity == "drug"
+                    and self._current_entity == "drug"
+                    and "drug_class_pipeline" not in self._completed_steps
+                ):
+                    await workflow.execute_activity(
+                        update_extraction_progress,
+                        args=[input.batch_id, input.congress_id, input.abstract_id, "drug_class", "failed"],
+                        task_queue=TaskQueues.ENTITY_MAPPING_PROGRESS,
+                        start_to_close_timeout=Timeouts.ENTITY_MAPPING_PROGRESS,
+                        retry_policy=RetryPolicies.ENTITY_MAPPING_PROGRESS,
+                    )
                 # Check if batch is done and finalize
                 await workflow.execute_activity(
                     "check_and_finalize_batch",
@@ -289,6 +303,25 @@ class AbstractExtractionWorkflow:
                         start_to_close_timeout=Timeouts.ENTITY_MAPPING_PROGRESS,
                         retry_policy=RetryPolicies.ENTITY_MAPPING_PROGRESS,
                     )
+                    # If drug pipeline was aborted, also mark drug_class as aborted
+                    if (
+                        input.entity == "drug"
+                        and self._current_entity == "drug"
+                        and "drug_class_pipeline" not in self._completed_steps
+                    ):
+                        workflow.start_activity(
+                            update_extraction_progress,
+                            args=[
+                                input.batch_id,
+                                input.congress_id,
+                                input.abstract_id,
+                                "drug_class",
+                                "aborted",
+                            ],
+                            task_queue=TaskQueues.ENTITY_MAPPING_PROGRESS,
+                            start_to_close_timeout=Timeouts.ENTITY_MAPPING_PROGRESS,
+                            retry_policy=RetryPolicies.ENTITY_MAPPING_PROGRESS,
+                        )
                     # Defensive: check batch finalization (likely no-op since
                     # AP server already set batch status to 'aborted')
                     workflow.start_activity(
@@ -312,6 +345,13 @@ class AbstractExtractionWorkflow:
                 )
                 self._retry_requested = False
                 self._output.errors.clear()
+                # Reset drug_class back to pending so it can run after drug succeeds
+                if (
+                    input.entity == "drug"
+                    and self._current_entity == "drug"
+                    and "drug_class_pipeline" not in self._completed_steps
+                ):
+                    await self._update_progress(input, "drug_class", "pending")
 
     async def _shielded_abort_progress(
         self, input: AbstractExtractionInput
@@ -343,6 +383,33 @@ class AbstractExtractionWorkflow:
                 f"Failed to update abort status for {input.abstract_id}, "
                 "workflow will still terminate as CANCELLED"
             )
+
+        # If drug pipeline was cancelled, also mark drug_class as aborted
+        if (
+            input.entity == "drug"
+            and (self._current_entity or input.entity) == "drug"
+            and "drug_class_pipeline" not in self._completed_steps
+        ):
+            try:
+                await asyncio.shield(
+                    workflow.execute_activity(
+                        update_extraction_progress,
+                        args=[
+                            input.batch_id,
+                            input.congress_id,
+                            input.abstract_id,
+                            "drug_class",
+                            "aborted",
+                        ],
+                        task_queue=TaskQueues.ENTITY_MAPPING_PROGRESS,
+                        start_to_close_timeout=Timeouts.ENTITY_MAPPING_PROGRESS,
+                        retry_policy=RetryPolicies.ENTITY_MAPPING_PROGRESS,
+                    )
+                )
+            except Exception:
+                workflow.logger.warning(
+                    f"Failed to update drug_class abort status for {input.abstract_id}"
+                )
 
     # =========================================================================
     # PROGRESS HELPERS
