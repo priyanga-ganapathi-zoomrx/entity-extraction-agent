@@ -1,7 +1,11 @@
 # Use congress-core-utils as base image
 ARG PROJECT_ID
 ARG ENV
+
 FROM us-docker.pkg.dev/${PROJECT_ID}/${ENV}/core-utils:latest
+LABEL maintainer="ZoomRx"
+
+RUN sudo apt-get --allow-releaseinfo-change update;
 
 # maintainer info
 LABEL maintainer="FERMA"
