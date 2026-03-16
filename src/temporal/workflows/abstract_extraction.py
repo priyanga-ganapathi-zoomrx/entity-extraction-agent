@@ -200,9 +200,17 @@ class AbstractExtractionWorkflow:
                     else:
                         workflow.logger.info(
                             f"No primary drugs for {input.abstract_id}, "
-                            "skipping drug class pipeline"
+                            "running explicit-only drug class pipeline"
                         )
-                        await self._update_progress(input, "drug_class", "success")
+                        if "drug_class_pipeline" not in self._completed_steps:
+                            await self._update_progress(input, "drug_class", "running")
+                            await self._run_drug_class_explicit_only_pipeline(input)
+                            await self._update_progress(input, "drug_class", "success")
+                            self._completed_steps.add("drug_class_pipeline")
+                        else:
+                            workflow.logger.info(
+                                f"Skipping already completed drug class pipeline for {input.abstract_id}"
+                            )
 
                 elif input.entity == "indication":
                     if "indication_pipeline" not in self._completed_steps:
@@ -676,6 +684,124 @@ class AbstractExtractionWorkflow:
         workflow.logger.info(
             f"Drug class pipeline completed for {input.abstract_id}"
         )
+
+    async def _run_drug_class_explicit_only_pipeline(
+        self, input: AbstractExtractionInput
+    ) -> None:
+        """Run drug class pipeline with only explicit extraction + validation (no primary drugs).
+
+        Steps 1-3 are skipped (no drugs to decompose/extract/select).
+        Steps 4-6 run: extract explicit drug classes from title, persist step5 (no consolidation),
+        then validate. Validation runs even when step4 returns empty/NA.
+        Uses same _dc_* state as full pipeline so retry resumes from the failed step.
+        """
+        workflow.logger.info(
+            f"Running explicit-only drug class pipeline for {input.abstract_id}"
+        )
+
+        # ---- Step 4: Explicit extraction from title ----
+        if self._dc_step4_result is None:
+            step4_result = await workflow.execute_activity(
+                step4_explicit,
+                ExplicitExtractionInput(
+                    abstract_id=input.abstract_id,
+                    abstract_title=input.abstract_title,
+                ),
+                task_queue=TaskQueues.DRUG_CLASS,
+                start_to_close_timeout=Timeouts.FAST_LLM,
+                retry_policy=RetryPolicies.FAST_LLM,
+            )
+            self._extract_token_metadata(step4_result)
+            await self._save_result(input, "drug_class", "step4", step4_result)
+            self._output.drug_class.explicit_classes = step4_result.get(
+                "explicit_drug_classes", []
+            )
+            self._dc_step4_result = step4_result
+        else:
+            workflow.logger.info(
+                f"Skipping completed drug class step 4 for {input.abstract_id}"
+            )
+
+        explicit = self._output.drug_class.explicit_classes
+
+        # ---- Step 5: No consolidation — use explicit as refined, persist for exporter ----
+        if self._dc_step5_output is None:
+            self._output.drug_class.refined_explicit_classes = explicit
+            self._dc_step5_output = {}
+            step5_data = {
+                "refined_explicit_classes": explicit,
+                "removed_classes": [],
+                "reasoning": "No primary drugs - explicit classes used directly",
+            }
+            await self._save_result(input, "drug_class", "step5", step5_data)
+        else:
+            workflow.logger.info(
+                f"Skipping completed drug class step 5 for {input.abstract_id}"
+            )
+
+        # ---- Step 6: Validation (runs even when explicit is empty/NA) ----
+        if self._dc_validation_data is None:
+            self._dc_validation_data = await self._run_drug_class_explicit_only_validation(
+                input
+            )
+            self._extract_token_metadata(self._dc_validation_data)
+            await self._save_result(
+                input, "drug_class", "validation", self._dc_validation_data
+            )
+            self._output.drug_class.validation_results = self._dc_validation_data.get(
+                "results", []
+            )
+        else:
+            workflow.logger.info(
+                f"Skipping completed drug class validation for {input.abstract_id}"
+            )
+
+        workflow.logger.info(
+            f"Explicit-only drug class pipeline completed for {input.abstract_id}"
+        )
+
+    async def _run_drug_class_explicit_only_validation(
+        self, input: AbstractExtractionInput,
+    ) -> dict:
+        """Validate explicit-only drug class extraction (no primary drugs, no search results).
+
+        Runs even when step4 returned empty/NA. Uses _dc_step4_result; call only after
+        step4 has run or been skipped on retry (so _dc_step4_result is set).
+        """
+        step4 = self._dc_step4_result or {}
+        explicit_classes = step4.get("explicit_drug_classes", [])
+        explicit_drug_classes = {
+            "drug_classes": explicit_classes,
+            "reasoning": step4.get("reasoning", ""),
+        }
+        extraction_result = {
+            "drug_classes": explicit_classes,
+            "selected_sources": ["abstract_title"],
+            "confidence_score": step4.get("confidence_score", 0.0),
+            "reasoning": step4.get("reasoning", ""),
+            "extraction_details": step4.get("extraction_details", []),
+        }
+        validation_result = await workflow.execute_activity(
+            validate_drug_class_activity,
+            DrugClassValidationInput(
+                abstract_id=input.abstract_id,
+                drug_name="",
+                abstract_title=input.abstract_title,
+                full_abstract=input.full_abstract,
+                search_results=[],
+                extraction_result=extraction_result,
+                drug_selections=[],
+                explicit_drug_classes=explicit_drug_classes,
+                refined_explicit_drug_classes={},
+            ),
+            task_queue=TaskQueues.DRUG_CLASS,
+            start_to_close_timeout=Timeouts.FAST_LLM,
+            retry_policy=RetryPolicies.FAST_LLM,
+        )
+        self._extract_token_metadata(validation_result)
+        return {
+            "results": [{"drug_name": "", "validation": validation_result}],
+        }
 
     async def _run_drug_class_steps1_3(
         self, input: AbstractExtractionInput, primary_drugs: list[str],
