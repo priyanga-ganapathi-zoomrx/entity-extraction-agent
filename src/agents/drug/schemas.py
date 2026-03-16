@@ -14,23 +14,30 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from src.agents.core.schemas import BaseActivityInput
+
 
 # =============================================================================
 # Dataclass for Function Input (Temporal-ready)
 # =============================================================================
 
 @dataclass
-class DrugInput:
-    """Input for drug extraction."""
-    abstract_id: int
-    abstract_title: str
+class DrugInput(BaseActivityInput):
+    """Input for drug extraction.
+
+    Inherits transaction context from BaseActivityInput:
+    - abstract_id, abstract_title, congress_id, batch_id
+    """
+    pass
 
 
 @dataclass
-class ValidationInput:
-    """Input for drug validation."""
-    abstract_id: int
-    abstract_title: str
+class ValidationInput(BaseActivityInput):
+    """Input for drug validation.
+
+    Inherits transaction context from BaseActivityInput:
+    - abstract_id, abstract_title, congress_id, batch_id
+    """
     extraction_result: dict  # The ExtractionResult as dict
 
 

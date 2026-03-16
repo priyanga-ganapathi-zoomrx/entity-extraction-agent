@@ -19,7 +19,7 @@ import time
 
 from temporalio import activity
 
-from src.agents.core.ems_logger import get_logger
+from src.agents.core.ems_logger import ActivityLogger
 from src.agents.core.token_tracking import TokenUsageCallbackHandler
 from src.agents.drug.config import config as drug_config
 from src.agents.drug.extraction_agent import extract_drugs as _extract_drugs
@@ -62,63 +62,59 @@ def extract_drugs(input_data: DrugInput) -> dict:
     activity.logger.info(
         f"Extracting drugs for abstract {input_data.abstract_id}"
     )
-    
-    ems_logger = get_logger("drug_extraction")
-    info = activity.info()
+
     tracker = TokenUsageCallbackHandler()
     start = time.time()
-    
+
+    # Initialize ActivityLogger (drug prompts are inline)
+    activity_logger = ActivityLogger(
+        step_name="drug_extraction",
+        entity="drug",
+        activity="extract",
+        input_data=input_data,
+        model=drug_config.EXTRACTION_MODEL,
+        prompt_file="inline",
+    )
+
     try:
         result = _extract_drugs(input_data, callbacks=[tracker])
         duration_ms = int((time.time() - start) * 1000)
         result_dict = result.model_dump()
-        
-        ems_logger.info(
-            "step_completed",
-            abstract_id=input_data.abstract_id,
-            model=drug_config.EXTRACTION_MODEL,
-            input_data={
-                "abstract_id": input_data.abstract_id,
-                "abstract_title": input_data.abstract_title,
-            },
+
+        # Log success with ECS format
+        activity_logger.log_success(
             output={
                 "primary_drugs": result_dict.get("primary_drugs"),
                 "secondary_drugs": result_dict.get("secondary_drugs"),
                 "comparator_drugs": result_dict.get("comparator_drugs"),
             },
-            outcome="success",
-            llm_calls=tracker.llm_calls,
-            input_tokens=tracker.usage.input_tokens,
-            output_tokens=tracker.usage.output_tokens,
-            total_tokens=tracker.usage.total_tokens,
+            labels={
+                "num_primary_drugs": len(result_dict.get("primary_drugs", [])),
+                "num_secondary_drugs": len(result_dict.get("secondary_drugs", [])),
+                "num_comparator_drugs": len(result_dict.get("comparator_drugs", [])),
+            },
+            tracker=tracker,
             duration_ms=duration_ms,
-            attempt=info.attempt,
-            workflow_run_id=info.workflow_run_id,
         )
-        
+
         # Serialize Pydantic model to dict with token metadata for workflow
         return {
             **result_dict,
             "_token_usage": tracker.usage.to_dict(),
             "_llm_calls": tracker.llm_calls,
         }
-        
+
     except Exception as e:
         duration_ms = int((time.time() - start) * 1000)
-        ems_logger.error(
-            "step_failed",
-            abstract_id=input_data.abstract_id,
-            model=drug_config.EXTRACTION_MODEL,
-            input_data={
-                "abstract_id": input_data.abstract_id,
-                "abstract_title": input_data.abstract_title,
+
+        # Log error with ECS format
+        activity_logger.log_error(
+            error=e,
+            labels={
+                "error_type": type(e).__name__,
             },
-            error=str(e),
-            outcome="failure",
-            exc_info=True,
+            tracker=tracker,
             duration_ms=duration_ms,
-            attempt=info.attempt,
-            workflow_run_id=info.workflow_run_id,
         )
         raise
 
@@ -161,63 +157,58 @@ def validate_drugs(input_data: ValidationInput) -> dict:
     activity.logger.info(
         f"Validating drugs for abstract {input_data.abstract_id}"
     )
-    
-    ems_logger = get_logger("drug_validation")
-    info = activity.info()
+
     tracker = TokenUsageCallbackHandler()
     start = time.time()
-    
+
+    # Initialize ActivityLogger (drug prompts are inline)
+    activity_logger = ActivityLogger(
+        step_name="drug_validation",
+        entity="drug",
+        activity="validate",
+        input_data=input_data,
+        model=drug_config.VALIDATION_MODEL,
+        prompt_file="inline",
+    )
+
     try:
         result = _validate_drugs(input_data, callbacks=[tracker])
         duration_ms = int((time.time() - start) * 1000)
         result_dict = result.model_dump()
-        
-        ems_logger.info(
-            "step_completed",
-            abstract_id=input_data.abstract_id,
-            model=drug_config.VALIDATION_MODEL,
-            input_data={
-                "abstract_id": input_data.abstract_id,
-                "abstract_title": input_data.abstract_title,
-                "primary_drugs": input_data.extraction_result.get("primary_drugs"),
-            },
+
+        # Log success with ECS format
+        activity_logger.log_success(
             output={
                 "validation_status": result_dict.get("validation_status"),
                 "validation_confidence": result_dict.get("validation_confidence"),
             },
-            outcome="success",
-            llm_calls=tracker.llm_calls,
-            input_tokens=tracker.usage.input_tokens,
-            output_tokens=tracker.usage.output_tokens,
-            total_tokens=tracker.usage.total_tokens,
+            labels={
+                "validation_passed": result_dict.get("validation_status") == "PASS",
+                "num_issues_found": len(result_dict.get("issues_found", [])),
+                "num_missed_drugs": len(result_dict.get("missed_drugs", [])),
+                "grounded_search_performed": result_dict.get("grounded_search_performed", False),
+            },
+            tracker=tracker,
             duration_ms=duration_ms,
-            attempt=info.attempt,
-            workflow_run_id=info.workflow_run_id,
         )
-        
+
         # Serialize Pydantic model to dict with token metadata for workflow
         return {
             **result_dict,
             "_token_usage": tracker.usage.to_dict(),
             "_llm_calls": tracker.llm_calls,
         }
-        
+
     except Exception as e:
         duration_ms = int((time.time() - start) * 1000)
-        ems_logger.error(
-            "step_failed",
-            abstract_id=input_data.abstract_id,
-            model=drug_config.VALIDATION_MODEL,
-            input_data={
-                "abstract_id": input_data.abstract_id,
-                "abstract_title": input_data.abstract_title,
-                "primary_drugs": input_data.extraction_result.get("primary_drugs"),
+
+        # Log error with ECS format
+        activity_logger.log_error(
+            error=e,
+            labels={
+                "error_type": type(e).__name__,
             },
-            error=str(e),
-            outcome="failure",
-            exc_info=True,
+            tracker=tracker,
             duration_ms=duration_ms,
-            attempt=info.attempt,
-            workflow_run_id=info.workflow_run_id,
         )
         raise
