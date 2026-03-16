@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Workflow Metrics Exporter for Temporal Workflow Outputs.
 
-Aggregates all status.json files across abstract outputs to produce a CSV
+Aggregates all status.json files across abstract outputs to produce an XLSX
 with one row per abstract containing:
 - Overall workflow status, timing, and error info
 - Per-step status, LLM call counts, and token consumption
@@ -13,17 +13,17 @@ Usage:
     # Local storage
     python -m src.scripts.temporal.workflow_metrics \
         --data_dir data/output \
-        --output workflow_metrics.csv
+        --output workflow_metrics.xlsx
 
     # GCS storage
     python -m src.scripts.temporal.workflow_metrics \
         --data_dir gs://bucket/Conference \
-        --output gs://bucket/Conference/workflow_metrics.csv
+        --output gs://bucket/Conference/workflow_metrics.xlsx
 
     # With limit
     python -m src.scripts.temporal.workflow_metrics \
         --data_dir data/output \
-        --output workflow_metrics.csv \
+        --output workflow_metrics.xlsx \
         --limit 100
 """
 
@@ -33,7 +33,7 @@ from datetime import datetime
 from tqdm import tqdm
 
 from src.scripts.temporal.utils import (
-    export_csv,
+    export_xlsx,
     get_data_storage,
     list_abstract_ids,
     load_status,
@@ -164,12 +164,12 @@ Examples:
     # Local storage
     python -m src.scripts.temporal.workflow_metrics \\
         --data_dir data/output \\
-        --output workflow_metrics.csv
+        --output workflow_metrics.xlsx
 
     # GCS storage
     python -m src.scripts.temporal.workflow_metrics \\
         --data_dir gs://bucket/Conference \\
-        --output gs://bucket/Conference/workflow_metrics.csv
+        --output gs://bucket/Conference/workflow_metrics.xlsx
         """,
     )
 
@@ -181,7 +181,7 @@ Examples:
     parser.add_argument(
         "--output",
         default=None,
-        help="Output CSV file path (local or gs://). Default: workflow_metrics_<timestamp>.csv",
+        help="Output XLSX file path (local or gs://). Default: workflow_metrics_<timestamp>.xlsx",
     )
     parser.add_argument(
         "--limit",
@@ -195,7 +195,7 @@ Examples:
     # Default output filename with timestamp
     if not args.output:
         timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-        args.output = f"workflow_metrics_{timestamp}.csv"
+        args.output = f"workflow_metrics_{timestamp}.xlsx"
 
     print("Workflow Metrics Exporter")
     print("=" * 60)
@@ -234,9 +234,9 @@ Examples:
     if missing_count:
         print(f"\nWarning: {missing_count} abstracts had no status.json")
 
-    # Export CSV
+    # Export XLSX
     fieldnames = get_fieldnames()
-    export_csv(rows, fieldnames, args.output)
+    export_xlsx(rows, fieldnames, args.output)
 
     print(f"\nDone. Exported {len(rows)} rows.")
 

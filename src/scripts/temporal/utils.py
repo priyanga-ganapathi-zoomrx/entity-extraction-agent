@@ -4,7 +4,7 @@ Common functions for:
 - CSV input loading
 - JSON file reading (with graceful fallback)
 - Storage client setup (local or GCS)
-- Data formatting helpers for CSV output
+- Data formatting helpers for XLSX output
 """
 
 import csv
@@ -12,6 +12,8 @@ import io
 import json
 from pathlib import Path
 from typing import Any, Optional, Union
+
+from openpyxl import Workbook
 
 from src.agents.core.storage import (
     GCSStorageClient,
@@ -342,46 +344,50 @@ def extract_combined_drug_classes(step3_selections: dict, step5_classes: list) -
 
 
 # =============================================================================
-# CSV OUTPUT
+# XLSX OUTPUT
 # =============================================================================
 
 
-def export_csv(
+def export_xlsx(
     rows: list[dict],
     fieldnames: list[str],
     output_path: str,
 ) -> None:
-    """Export data to CSV file (supports both local and GCS paths).
+    """Export data to XLSX file (supports both local and GCS paths).
 
     Args:
         rows: List of row dicts to write
         fieldnames: Column names in order
-        output_path: Path to output CSV file (local path or gs://bucket/path)
+        output_path: Path to output XLSX file (local path or gs://bucket/path)
     """
-    # Write CSV content to string buffer
-    output_buffer = io.StringIO()
-    writer = csv.DictWriter(output_buffer, fieldnames=fieldnames)
-    writer.writeheader()
-    writer.writerows(rows)
-    csv_content = output_buffer.getvalue()
+    wb = Workbook()
+    ws = wb.active
+    ws.append(fieldnames)
+    for row in rows:
+        ws.append([row.get(field, "") for field in fieldnames])
 
     if output_path.startswith("gs://"):
         bucket_name, full_prefix = parse_gcs_path(output_path)
         if "/" in full_prefix:
             base_prefix = "/".join(full_prefix.split("/")[:-1])
-            csv_filename = full_prefix.split("/")[-1]
+            xlsx_filename = full_prefix.split("/")[-1]
         else:
             base_prefix = ""
-            csv_filename = full_prefix
+            xlsx_filename = full_prefix
         output_storage = GCSStorageClient(bucket_name, base_prefix)
-        output_storage.upload_text(csv_filename, csv_content)
-        print(f"\nCSV file saved to GCS: {output_path}")
+        buffer = io.BytesIO()
+        wb.save(buffer)
+        output_storage.upload_bytes(
+            xlsx_filename,
+            buffer.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        print(f"\nXLSX file saved to GCS: {output_path}")
     else:
         output_dir = Path(output_path).parent
         if output_dir and str(output_dir) != "." and not output_dir.exists():
             output_dir.mkdir(parents=True, exist_ok=True)
 
-        with open(output_path, "w", newline="", encoding="utf-8") as f:
-            f.write(csv_content)
+        wb.save(output_path)
 
-        print(f"\nCSV file saved: {output_path}")
+        print(f"\nXLSX file saved: {output_path}")
