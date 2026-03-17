@@ -274,32 +274,45 @@ def _send_batch_notification(
         if row.status in counts:
             counts[row.status] += 1
 
-    total = len(batch_sessions)
+    total = len({row.session_id for row in batch_sessions})
     status_emoji = {"completed": "✅", "partial": "⚠️", "failed": "❌", "aborted": "🚫"}
     emoji = status_emoji.get(final_status, "ℹ️")
 
     title = f"{emoji} Entity Extraction — Batch {batch_id} {final_status.upper()}"
 
-    data = {
+    # -- Batch details --
+    details = {
         "Congress": congress_name,
         "Batch ID": str(batch_id),
-        "Status": final_status,
+        "Status": final_status.capitalize(),
         "Total Sessions": str(total),
     }
 
     if triggered_by:
-        data["Triggered By"] = triggered_by
+        details["Triggered By"] = triggered_by
 
     if created_at:
         # MySQL TIMESTAMP is naive UTC; completed_at is aware UTC — normalize
         completed_naive = completed_at.replace(tzinfo=None)
         duration = completed_naive - created_at
         mins, secs = divmod(int(duration.total_seconds()), 60)
-        data["Duration"] = f"{mins}m {secs}s"
+        details["Total Time"] = f"{mins}m {secs}s"
 
+    # -- Results per entity --
+    results = {}
     for entity in entities:
         counts = entity_counts.get(entity, {})
         s, f, a = counts.get("success", 0), counts.get("failed", 0), counts.get("aborted", 0)
-        data[entity.replace("_", " ").title()] = f"✅ {s}  ❌ {f}  🚫 {a}"
+        label = entity.replace("_", " ").title()
+        parts = []
+        if s:
+            parts.append(f"{s} Successful")
+        if f:
+            parts.append(f"{f} Failed")
+        if a:
+            parts.append(f"{a} Aborted")
+        results[label] = " | ".join(parts) if parts else "—"
 
-    send_teams_message(title, format_facts(data))
+    # Combine with a separator between details and results
+    body = format_facts(details) + "<br>---<br>" + format_facts(results)
+    send_teams_message(title, body)
