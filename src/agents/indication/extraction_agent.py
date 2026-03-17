@@ -41,7 +41,7 @@ class IndicationAgent:
             timeout=120,  # 2 minute timeout
         ))
         self.llm_with_tools = self.llm.bind_tools(self.tools)
-        self.system_prompt, self.prompt_version = get_extraction_prompt()
+        self.system_prompt, self.prompt_file = get_extraction_prompt()
         self.graph = self._build()
         
         self._langfuse_enabled = is_langfuse_enabled()
@@ -98,7 +98,7 @@ class IndicationAgent:
         tags = [
             f"abstract_id:{abstract_id or 'unknown'}",
             f"prompt_name:MEDICAL_INDICATION_EXTRACTION_SYSTEM_PROMPT",
-            f"prompt_version:{self.prompt_version}",
+            f"prompt_file:{self.prompt_file}",
             f"model:{config.LLM_MODEL}",
         ]
         

@@ -495,6 +495,8 @@ class AbstractExtractionWorkflow:
                 DrugInput(
                     abstract_id=input.abstract_id,
                     abstract_title=input.abstract_title,
+                    congress_id=input.congress_id,
+                    batch_id=input.batch_id,
                 ),
                 task_queue=TaskQueues.DRUG,
                 start_to_close_timeout=Timeouts.FAST_LLM,
@@ -513,6 +515,8 @@ class AbstractExtractionWorkflow:
                 DrugValidationInput(
                     abstract_id=input.abstract_id,
                     abstract_title=input.abstract_title,
+                    congress_id=input.congress_id,
+                    batch_id=input.batch_id,
                     extraction_result=self._output.drug.extraction,
                 ),
                 task_queue=TaskQueues.DRUG,
@@ -540,6 +544,8 @@ class AbstractExtractionWorkflow:
         indication_input = IndicationInput(
             abstract_id=input.abstract_id,
             abstract_title=input.abstract_title,
+            congress_id=input.congress_id,
+            batch_id=input.batch_id,
             session_title=input.session_title,
             rules_file_path=input.rules_file_path,
         )
@@ -623,6 +629,8 @@ class AbstractExtractionWorkflow:
                 ExplicitExtractionInput(
                     abstract_id=input.abstract_id,
                     abstract_title=input.abstract_title,
+                    congress_id=input.congress_id,
+                    batch_id=input.batch_id,
                 ),
                 task_queue=TaskQueues.DRUG_CLASS,
                 start_to_close_timeout=Timeouts.FAST_LLM,
@@ -649,6 +657,8 @@ class AbstractExtractionWorkflow:
                     ConsolidationInput(
                         abstract_id=input.abstract_id,
                         abstract_title=input.abstract_title,
+                        congress_id=input.congress_id,
+                        batch_id=input.batch_id,
                         explicit_drug_classes=explicit,
                         drug_selections=drug_selections,
                     ),
@@ -706,6 +716,8 @@ class AbstractExtractionWorkflow:
                 ExplicitExtractionInput(
                     abstract_id=input.abstract_id,
                     abstract_title=input.abstract_title,
+                    congress_id=input.congress_id,
+                    batch_id=input.batch_id,
                 ),
                 task_queue=TaskQueues.DRUG_CLASS,
                 start_to_close_timeout=Timeouts.FAST_LLM,
@@ -785,8 +797,10 @@ class AbstractExtractionWorkflow:
             validate_drug_class_activity,
             DrugClassValidationInput(
                 abstract_id=input.abstract_id,
-                drug_name="",
                 abstract_title=input.abstract_title,
+                congress_id=input.congress_id,
+                batch_id=input.batch_id,
+                drug_name="",
                 full_abstract=input.full_abstract,
                 search_results=[],
                 extraction_result=extraction_result,
@@ -824,6 +838,8 @@ class AbstractExtractionWorkflow:
                 RegimenInput(
                     abstract_id=input.abstract_id,
                     abstract_title=input.abstract_title,
+                    congress_id=input.congress_id,
+                    batch_id=input.batch_id,
                     drug=drug,
                 ),
                 task_queue=TaskQueues.DRUG_CLASS,
@@ -849,6 +865,8 @@ class AbstractExtractionWorkflow:
                 ext_input = DrugClassExtractionInput(
                     abstract_id=input.abstract_id,
                     abstract_title=input.abstract_title,
+                    congress_id=input.congress_id,
+                    batch_id=input.batch_id,
                     drug=component,
                     full_abstract=input.full_abstract,
                     firms=input.firms,
@@ -888,6 +906,9 @@ class AbstractExtractionWorkflow:
                         step3_selection,
                         SelectionInput(
                             abstract_id=input.abstract_id,
+                            abstract_title=input.abstract_title,
+                            congress_id=input.congress_id,
+                            batch_id=input.batch_id,
                             drug_name=component,
                             extraction_details=extraction_details,
                         ),
@@ -994,8 +1015,10 @@ class AbstractExtractionWorkflow:
                 validate_drug_class_activity,
                 DrugClassValidationInput(
                     abstract_id=input.abstract_id,
-                    drug_name=component,
                     abstract_title=input.abstract_title,
+                    congress_id=input.congress_id,
+                    batch_id=input.batch_id,
+                    drug_name=component,
                     full_abstract=input.full_abstract,
                     search_results=search_result.get("drug_class_results", []),
                     extraction_result=extraction_result,

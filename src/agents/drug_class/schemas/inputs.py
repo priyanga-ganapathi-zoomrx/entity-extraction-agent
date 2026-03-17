@@ -6,19 +6,22 @@ These are Temporal-serializable and used as function arguments.
 
 from dataclasses import dataclass, field
 
+from src.agents.core.schemas import BaseActivityInput
+
 
 # =============================================================================
 # PIPELINE INPUT (from drug extraction module)
 # =============================================================================
 
 @dataclass
-class DrugClassInput:
+class DrugClassInput(BaseActivityInput):
     """Input for the drug class extraction pipeline.
-    
+
     Chains from drug extraction output.
+
+    Inherits transaction context from BaseActivityInput:
+    - abstract_id, abstract_title, congress_id, batch_id
     """
-    abstract_id: int
-    abstract_title: str
     full_abstract: str = ""
     primary_drugs: list[str] = field(default_factory=list)
     firms: list[str] = field(default_factory=list)  # For firm search in Step 2
@@ -29,10 +32,12 @@ class DrugClassInput:
 # =============================================================================
 
 @dataclass
-class RegimenInput:
-    """Input for regimen identification (single drug)."""
-    abstract_id: int
-    abstract_title: str
+class RegimenInput(BaseActivityInput):
+    """Input for regimen identification (single drug).
+
+    Inherits transaction context from BaseActivityInput:
+    - abstract_id, abstract_title, congress_id, batch_id
+    """
     drug: str
 
 
@@ -41,10 +46,12 @@ class RegimenInput:
 # =============================================================================
 
 @dataclass
-class DrugClassExtractionInput:
-    """Input for drug class extraction (single drug)."""
-    abstract_id: int
-    abstract_title: str
+class DrugClassExtractionInput(BaseActivityInput):
+    """Input for drug class extraction (single drug).
+
+    Inherits transaction context from BaseActivityInput:
+    - abstract_id, abstract_title, congress_id, batch_id
+    """
     drug: str
     full_abstract: str = ""
     firms: list[str] = field(default_factory=list)
@@ -57,9 +64,14 @@ class DrugClassExtractionInput:
 # =============================================================================
 
 @dataclass
-class SelectionInput:
-    """Input for drug class selection (single drug)."""
-    abstract_id: int
+class SelectionInput(BaseActivityInput):
+    """Input for drug class selection (single drug).
+
+    Inherits transaction context from BaseActivityInput:
+    - abstract_id, abstract_title, congress_id, batch_id
+
+    Note: drug_name is used instead of abstract_title for this specific step.
+    """
     drug_name: str
     extraction_details: list[dict]
 
@@ -69,10 +81,13 @@ class SelectionInput:
 # =============================================================================
 
 @dataclass
-class ExplicitExtractionInput:
-    """Input for explicit extraction from title."""
-    abstract_id: int
-    abstract_title: str
+class ExplicitExtractionInput(BaseActivityInput):
+    """Input for explicit extraction from title.
+
+    Inherits transaction context from BaseActivityInput:
+    - abstract_id, abstract_title, congress_id, batch_id
+    """
+    pass
 
 
 # =============================================================================
@@ -80,10 +95,12 @@ class ExplicitExtractionInput:
 # =============================================================================
 
 @dataclass
-class ConsolidationInput:
-    """Input for consolidation."""
-    abstract_id: int
-    abstract_title: str
+class ConsolidationInput(BaseActivityInput):
+    """Input for consolidation.
+
+    Inherits transaction context from BaseActivityInput:
+    - abstract_id, abstract_title, congress_id, batch_id
+    """
     explicit_drug_classes: list[str]
     drug_selections: list[dict]  # [{drug_name, selected_classes}, ...]
 
@@ -93,15 +110,16 @@ class ConsolidationInput:
 # =============================================================================
 
 @dataclass
-class ValidationInput:
+class ValidationInput(BaseActivityInput):
     """Input for drug class validation.
-    
+
     Contains the original extraction inputs and the result to validate,
     plus outputs from steps 3-5 for selection/title/consolidation checks.
+
+    Inherits transaction context from BaseActivityInput:
+    - abstract_id, abstract_title, congress_id, batch_id
     """
-    abstract_id: int
     drug_name: str
-    abstract_title: str
     full_abstract: str
     search_results: list[dict]  # [{url, content}, ...]
     extraction_result: dict  # {drug_classes, selected_sources, reasoning, extraction_details}

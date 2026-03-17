@@ -33,9 +33,9 @@ def load_prompt(
         prompts_dir: Directory containing local prompt files (used for fallback and agent_type derivation)
 
     Returns:
-        tuple[str, str]: (prompt_content, version)
-            - version is "gcs:<updated_timestamp>" when loaded from GCS
-            - version is "local" when loaded from local file
+        tuple[str, str]: (prompt_content, file_path)
+            - file_path is "gcs://bucket_name/prompts/{agent_type}/{prompt_name}.md" when loaded from GCS
+            - file_path is "inline" when loaded from local file
     """
     if prompt_name in _prompt_cache:
         return _prompt_cache[prompt_name]
@@ -56,7 +56,7 @@ def load_prompt(
 def _load_from_gcs(prompt_name: str, prompts_dir: Path) -> tuple[str, str]:
     """Load prompt from GCS bucket.
 
-    Uses google.cloud.storage directly to access blob metadata (updated timestamp).
+    Uses google.cloud.storage directly to access blob metadata.
     """
     if settings.gcs.GOOGLE_APPLICATION_CREDENTIALS:
         creds_path = settings.gcs.GOOGLE_APPLICATION_CREDENTIALS.strip()
@@ -66,7 +66,8 @@ def _load_from_gcs(prompt_name: str, prompts_dir: Path) -> tuple[str, str]:
     project_id = settings.gcs.GCS_PROJECT_ID.strip() if settings.gcs.GCS_PROJECT_ID else None
     client = gcs_storage.Client(project=project_id) if project_id else gcs_storage.Client()
 
-    bucket = client.bucket(settings.gcs.GCS_BUCKET_NAME)
+    bucket_name = settings.gcs.GCS_BUCKET_NAME
+    bucket = client.bucket(bucket_name)
     agent_type = prompts_dir.parent.name
     blob_path = f"prompts/{agent_type}/{prompt_name}.md"
     blob = bucket.blob(blob_path)
@@ -74,20 +75,22 @@ def _load_from_gcs(prompt_name: str, prompts_dir: Path) -> tuple[str, str]:
     content = blob.download_as_text()
     content = content.lstrip("\ufeff").strip()
 
-    blob.reload()
-    updated = blob.updated.isoformat() if blob.updated else "unknown"
-    version = f"gcs:{updated}"
+    # Return GCS URI as file_path for EMS logging
+    file_path = f"gcs://{bucket_name}/{blob_path}"
 
-    logger.info("Loaded prompt '%s' from GCS (version: %s)", prompt_name, version)
-    return content, version
+    logger.info("Loaded prompt '%s' from GCS: %s", prompt_name, file_path)
+    return content, file_path
 
 
 def _load_from_file(prompt_name: str, prompts_dir: Path) -> tuple[str, str]:
-    """Load prompt from local file."""
+    """Load prompt from local file.
+
+    Returns 'inline' as file_path to indicate local/embedded prompts.
+    """
     prompt_file = prompts_dir / f"{prompt_name}.md"
     logger.info("Loading prompt from %s", prompt_file)
     content = prompt_file.read_text(encoding="utf-8")
-    return content.strip(), "local"
+    return content.strip(), "inline"
 
 
 def clear_prompt_cache() -> None:
