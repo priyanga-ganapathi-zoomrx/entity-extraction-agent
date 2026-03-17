@@ -81,7 +81,7 @@ class Timeouts:
     """Timeout configurations by activity type."""
     
     # Storage/checkpoint activities (typically <1s)
-    STORAGE = timedelta(minutes=1)
+    STORAGE = timedelta(minutes=2)
     
     # Fast LLM activities - Gemini (typically 5-15s, preview models can spike to 90s+)
     FAST_LLM = timedelta(minutes=4)
@@ -90,7 +90,7 @@ class Timeouts:
     SLOW_LLM = timedelta(minutes=5)
     
     # Search activities - Tavily API (typically 2-10s)
-    SEARCH = timedelta(seconds=45)
+    SEARCH = timedelta(minutes=2)
     
     # Workflow execution timeout (entire abstract processing)
     WORKFLOW_EXECUTION = timedelta(minutes=60)
