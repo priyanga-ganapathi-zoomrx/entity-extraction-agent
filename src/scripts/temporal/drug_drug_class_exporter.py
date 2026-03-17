@@ -90,6 +90,8 @@ NEW_COLUMNS = [
     "drug_class_step5_refined_explicit_classes",
     "drug_class_step5_removed_classes",
     "drug_class_step5_reasoning",
+    # Combined explicit classes (step 5 if primary drugs exist, else step 4)
+    "drug_class_combined_explicit_classes",
     # Combined drug classes (step 3 + step 5)
     "drug_class_implicit_drug_classes",
     "drug_class_combined_all_classes",
@@ -500,6 +502,20 @@ def _load_abstract_data(data_storage, abstract_id: str, row: dict) -> tuple | No
     output_row.update(transform_drug_class_step3(steps1_3_data))
     output_row.update(transform_drug_class_step4(step4_data))
     output_row.update(transform_drug_class_step5(step5_data))
+
+    # Combined explicit classes: if primary drugs exist, step 5 ran → use its result
+    # (even if empty, since deduplication may have intentionally removed all).
+    # Otherwise step 5 was skipped → use step 4's raw explicit classes.
+    has_primary_drugs = bool(output_row.get("drug_extraction_primary_drugs", ""))
+    if has_primary_drugs:
+        output_row["drug_class_combined_explicit_classes"] = output_row.get(
+            "drug_class_step5_refined_explicit_classes", ""
+        )
+    else:
+        output_row["drug_class_combined_explicit_classes"] = output_row.get(
+            "drug_class_step4_explicit_drug_classes", ""
+        )
+
     output_row["drug_class_combined_all_classes"] = get_combined_classes(
         steps1_3_data, step5_data
     )
