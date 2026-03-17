@@ -38,7 +38,7 @@ class RegimenInput(BaseActivityInput):
     Inherits transaction context from BaseActivityInput:
     - abstract_id, abstract_title, congress_id, batch_id
     """
-    drug: str
+    drug: str = ""
 
 
 # =============================================================================
@@ -52,7 +52,7 @@ class DrugClassExtractionInput(BaseActivityInput):
     Inherits transaction context from BaseActivityInput:
     - abstract_id, abstract_title, congress_id, batch_id
     """
-    drug: str
+    drug: str = ""
     full_abstract: str = ""
     firms: list[str] = field(default_factory=list)
     drug_class_results: list[dict] = field(default_factory=list)  # From Tavily drug class search
@@ -72,8 +72,8 @@ class SelectionInput(BaseActivityInput):
 
     Note: drug_name is used instead of abstract_title for this specific step.
     """
-    drug_name: str
-    extraction_details: list[dict]
+    drug_name: str = ""
+    extraction_details: list[dict] = field(default_factory=list)
 
 
 # =============================================================================
@@ -101,8 +101,8 @@ class ConsolidationInput(BaseActivityInput):
     Inherits transaction context from BaseActivityInput:
     - abstract_id, abstract_title, congress_id, batch_id
     """
-    explicit_drug_classes: list[str]
-    drug_selections: list[dict]  # [{drug_name, selected_classes}, ...]
+    explicit_drug_classes: list[str] = field(default_factory=list)
+    drug_selections: list[dict] = field(default_factory=list)  # [{drug_name, selected_classes}, ...]
 
 
 # =============================================================================
@@ -119,10 +119,10 @@ class ValidationInput(BaseActivityInput):
     Inherits transaction context from BaseActivityInput:
     - abstract_id, abstract_title, congress_id, batch_id
     """
-    drug_name: str
-    full_abstract: str
-    search_results: list[dict]  # [{url, content}, ...]
-    extraction_result: dict  # {drug_classes, selected_sources, reasoning, extraction_details}
+    drug_name: str = ""
+    full_abstract: str = ""
+    search_results: list[dict] = field(default_factory=list)  # [{url, content}, ...]
+    extraction_result: dict = field(default_factory=dict)  # {drug_classes, selected_sources, reasoning, extraction_details}
     drug_selections: list[dict] = field(default_factory=list)  # Step 3: [{drug_name, selected_classes, reasoning}, ...]
     explicit_drug_classes: dict = field(default_factory=dict)  # Step 4: {drug_classes, reasoning}
     refined_explicit_drug_classes: dict = field(default_factory=dict)  # Step 5: {drug_classes, removed_classes, reasoning}

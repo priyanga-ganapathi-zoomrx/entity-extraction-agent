@@ -9,7 +9,7 @@ If LLM returns malformed JSON, Pydantic will raise ValidationError,
 which triggers Temporal retry at the activity level.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
@@ -38,7 +38,7 @@ class ValidationInput(BaseActivityInput):
     Inherits transaction context from BaseActivityInput:
     - abstract_id, abstract_title, congress_id, batch_id
     """
-    extraction_result: dict  # The ExtractionResult as dict
+    extraction_result: dict = field(default_factory=dict)  # The ExtractionResult as dict
 
 
 # =============================================================================
