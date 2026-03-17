@@ -349,6 +349,9 @@ def extract_combined_drug_classes(step3_selections: dict, step5_classes: list) -
 # =============================================================================
 
 
+_CONTROL_CHAR_RE = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f]')
+
+
 def export_xlsx(
     rows: list[dict],
     fieldnames: list[str],
@@ -361,11 +364,11 @@ def export_xlsx(
         fieldnames: Column names in order
         output_path: Path to output XLSX file (local path or gs://bucket/path)
     """
-    wb = Workbook()
-    ws = wb.active
+    wb = Workbook(write_only=True)
+    ws = wb.create_sheet()
     ws.append(fieldnames)
     for row in rows:
-        ws.append([re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', str(v)) if (v := row.get(field, "")) else "" for field in fieldnames])
+        ws.append([_CONTROL_CHAR_RE.sub('', str(v)) if (v := row.get(field, "")) else "" for field in fieldnames])
 
     if output_path.startswith("gs://"):
         bucket_name, full_prefix = parse_gcs_path(output_path)

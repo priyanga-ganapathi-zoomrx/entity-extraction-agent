@@ -30,6 +30,7 @@ Usage:
 """
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
 from tqdm import tqdm
@@ -142,48 +143,80 @@ def transform_indication_validation(
 # =============================================================================
 
 
-def process_abstracts(rows, fieldnames, data_storage) -> list[dict]:
+def _load_abstract_data(data_storage, abstract_id: str, row: dict) -> dict | None:
+    """Load and transform data for a single abstract (designed for parallel execution).
+
+    Args:
+        data_storage: Storage client for Temporal workflow data
+        abstract_id: The abstract ID to load
+        row: Original input row dict
+
+    Returns:
+        Tuple of (output_row, has_extraction, has_validation) or None if no abstract_id
+    """
+    if not abstract_id:
+        return None
+
+    # Load all 3 JSON files for this abstract
+    extraction_data = load_step_output(data_storage, abstract_id, "indication_extraction")
+    validation_data = load_step_output(data_storage, abstract_id, "indication_validation")
+    status = load_status(data_storage, abstract_id)
+
+    # Build output row
+    output_row = dict(row)
+    output_row.update(transform_indication_extraction(extraction_data))
+    output_row.update(transform_indication_validation(validation_data, status))
+
+    return (output_row, bool(extraction_data), bool(validation_data))
+
+
+def process_abstracts(rows, fieldnames, data_storage, max_workers: int = 20) -> list[dict]:
     """Process all abstracts and build combined output rows.
+
+    Uses thread pool to parallelize I/O-bound JSON file loading.
 
     Args:
         rows: List of input CSV row dicts
         fieldnames: Column names from input CSV
         data_storage: Storage client for Temporal workflow data
+        max_workers: Number of parallel threads for file loading
 
     Returns:
         List of output row dicts
     """
     id_col = get_abstract_id_column(fieldnames)
-    output_rows = []
-
     stats = {"extraction_found": 0, "validation_found": 0}
 
-    for row in tqdm(rows, desc="Processing abstracts", unit="abstract"):
-        abstract_id = row.get(id_col, "") if id_col else ""
+    # Submit all tasks to thread pool
+    # Use dict to preserve original row order
+    futures_to_index = {}
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        for i, row in enumerate(rows):
+            abstract_id = row.get(id_col, "") if id_col else ""
+            future = executor.submit(_load_abstract_data, data_storage, abstract_id, row)
+            futures_to_index[future] = i
 
-        if not abstract_id:
+        # Collect results with progress bar
+        results = [None] * len(rows)
+        for future in tqdm(
+            as_completed(futures_to_index),
+            total=len(futures_to_index),
+            desc="Processing abstracts",
+            unit="abstract",
+        ):
+            idx = futures_to_index[future]
+            results[idx] = future.result()
+
+    # Build output rows in original order
+    output_rows = []
+    for result in results:
+        if result is None:
             continue
-
-        # Start with input columns
-        output_row = dict(row)
-
-        # Load data files
-        extraction_data = load_step_output(data_storage, abstract_id, "indication_extraction")
-        validation_data = load_step_output(data_storage, abstract_id, "indication_validation")
-        status = load_status(data_storage, abstract_id)
-
-        # Transform extraction
-        extraction_cols = transform_indication_extraction(extraction_data)
-        if extraction_data:
+        output_row, has_extraction, has_validation = result
+        if has_extraction:
             stats["extraction_found"] += 1
-        output_row.update(extraction_cols)
-
-        # Transform validation
-        validation_cols = transform_indication_validation(validation_data, status)
-        if validation_data:
+        if has_validation:
             stats["validation_found"] += 1
-        output_row.update(validation_cols)
-
         output_rows.append(output_row)
 
     # Print stats
