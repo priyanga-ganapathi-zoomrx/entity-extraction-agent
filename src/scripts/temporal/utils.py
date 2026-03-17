@@ -10,6 +10,7 @@ Common functions for:
 import csv
 import io
 import json
+import re
 from pathlib import Path
 from typing import Any, Optional, Union
 
@@ -364,7 +365,7 @@ def export_xlsx(
     ws = wb.active
     ws.append(fieldnames)
     for row in rows:
-        ws.append([row.get(field, "") for field in fieldnames])
+        ws.append([re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', str(v)) if (v := row.get(field, "")) else "" for field in fieldnames])
 
     if output_path.startswith("gs://"):
         bucket_name, full_prefix = parse_gcs_path(output_path)
