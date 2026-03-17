@@ -90,6 +90,7 @@ NEW_COLUMNS = [
     "drug_class_step5_removed_classes",
     "drug_class_step5_reasoning",
     # Combined drug classes (step 3 + step 5)
+    "drug_class_implicit_drug_classes",
     "drug_class_combined_all_classes",
     # Drug class validation
     "drug_class_validation_overall_status",
@@ -268,6 +269,7 @@ def transform_drug_class_step3(steps1_3_data: dict) -> dict:
         return {
             "drug_class_step3_selected_drug_classes": "",
             "drug_class_step3_reasoning": "",
+            "drug_class_implicit_drug_classes": "",
         }
 
     drug_results = steps1_3_data.get("drug_results", [])
@@ -282,9 +284,18 @@ def transform_drug_class_step3(steps1_3_data: dict) -> dict:
                 selected_drug_classes[drug_name] = result.get("selected_drug_classes", [])
                 reasoning[drug_name] = result.get("reasoning", "")
 
+    all_implicit = set()
+    for classes in selected_drug_classes.values():
+        if isinstance(classes, list):
+            for c in classes:
+                if c and c != "NA":
+                    all_implicit.add(c.strip())
+    implicit_str = ";;".join(sorted(all_implicit)) if all_implicit else ""
+
     return {
         "drug_class_step3_selected_drug_classes": format_dict_as_key_value(selected_drug_classes),
         "drug_class_step3_reasoning": to_json_string(reasoning),
+        "drug_class_implicit_drug_classes": implicit_str,
     }
 
 
