@@ -38,7 +38,7 @@ class RegimenInput(BaseActivityInput):
     Inherits transaction context from BaseActivityInput:
     - abstract_id, abstract_title, congress_id, batch_id
     """
-    drug: str = ""
+    drug: str = ""  # Required but set to empty string for dataclass compatibility
 
 
 # =============================================================================
@@ -52,7 +52,7 @@ class DrugClassExtractionInput(BaseActivityInput):
     Inherits transaction context from BaseActivityInput:
     - abstract_id, abstract_title, congress_id, batch_id
     """
-    drug: str = ""
+    drug: str = ""  # Required but set to empty string for dataclass compatibility
     full_abstract: str = ""
     firms: list[str] = field(default_factory=list)
     drug_class_results: list[dict] = field(default_factory=list)  # From Tavily drug class search
@@ -72,7 +72,7 @@ class SelectionInput(BaseActivityInput):
 
     Note: drug_name is used instead of abstract_title for this specific step.
     """
-    drug_name: str = ""
+    drug_name: str = ""  # Required but set to empty string for dataclass compatibility
     extraction_details: list[dict] = field(default_factory=list)
 
 
@@ -119,7 +119,7 @@ class ValidationInput(BaseActivityInput):
     Inherits transaction context from BaseActivityInput:
     - abstract_id, abstract_title, congress_id, batch_id
     """
-    drug_name: str = ""
+    drug_name: str = ""  # Required but set to empty string for dataclass compatibility
     full_abstract: str = ""
     search_results: list[dict] = field(default_factory=list)  # [{url, content}, ...]
     extraction_result: dict = field(default_factory=dict)  # {drug_classes, selected_sources, reasoning, extraction_details}

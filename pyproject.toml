@@ -7,12 +7,13 @@ requires-python = "~=3.11.0"
 dependencies = [
     "cgutils[mysql]",
     "langchain~=1.0.3",
-    "langchain-core~=1.0.3",
+    "langchain-core>=1.2.0,<2.0.0",
+    "langchain-community>=0.4.0,<1.0.0",
     "langchain-openai~=1.0.2",
     "langchain-anthropic~=1.0.1",
     "langchain-google-genai~=3.0.1",
     "langgraph~=1.0.2",
-    "langfuse>=3.2.7,<4.0",
+    "langfuse>=4.0.0,<5.0.0",
     "httpx[http2]~=0.28.1",
     "python-dotenv~=1.0.0",
     "tavily-python~=0.7.13",
@@ -30,6 +31,61 @@ dependencies = [
 
 [tool.uv.sources]
 cgutils = { path = "../congress-core-utils" }
+
+[dependency-groups]
+dev = [
+    "pytest~=8.3.4",
+    "pytest-asyncio~=0.24.0",
+    "pytest-mock~=3.14.0",
+    "pytest-cov~=6.0.0",
+    "pytest-env~=1.1.5",
+    "faker~=33.1.0",
+    "freezegun~=1.5.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+markers = [
+    "unit: Fast unit tests with mocked dependencies",
+    "integration: Slower integration tests with real services",
+    "temporal: Temporal workflow/activity tests",
+    "slow: Tests that take >5 seconds",
+    "requires_api: Tests that can optionally use real API calls",
+]
+addopts = [
+    "-v",
+    "--strict-markers",
+    "--tb=short",
+    "--cov=src",
+    "--cov-report=term-missing",
+    "--cov-report=html",
+]
+env = [
+    "ENVIRONMENT=dev",
+]
+
+[tool.coverage.run]
+source = ["src"]
+omit = [
+    "*/tests/*",
+    "*/test_*.py",
+    "*/__pycache__/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "if typing.TYPE_CHECKING:",
+]
 
 [tool.black]
 line-length = 88
