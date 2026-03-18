@@ -38,6 +38,7 @@ Usage:
 """
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 
 from tqdm import tqdm
@@ -89,6 +90,8 @@ NEW_COLUMNS = [
     "drug_class_step5_refined_explicit_classes",
     "drug_class_step5_removed_classes",
     "drug_class_step5_reasoning",
+    # Combined explicit classes (step 5 if primary drugs exist, else step 4)
+    "drug_class_combined_explicit_classes",
     # Combined drug classes (step 3 + step 5)
     "drug_class_implicit_drug_classes",
     "drug_class_combined_all_classes",
@@ -468,19 +471,84 @@ def get_combined_classes(steps1_3_data: dict, step5_data: dict) -> str:
 # =============================================================================
 
 
-def process_abstracts(rows, fieldnames, data_storage) -> list[dict]:
+def _load_abstract_data(data_storage, abstract_id: str, row: dict) -> tuple | None:
+    """Load and transform data for a single abstract (designed for parallel execution).
+
+    Args:
+        data_storage: Storage client for Temporal workflow data
+        abstract_id: The abstract ID to load
+        row: Original input row dict
+
+    Returns:
+        Tuple of (output_row, stats_dict) or None if no abstract_id
+    """
+    if not abstract_id:
+        return None
+
+    # Load all 6 JSON files for this abstract
+    drug_extraction = load_step_output(data_storage, abstract_id, "drug_extraction")
+    drug_validation = load_step_output(data_storage, abstract_id, "drug_validation")
+    steps1_3_data = load_step_output(data_storage, abstract_id, "drug_class_steps1_3")
+    step4_data = load_step_output(data_storage, abstract_id, "drug_class_step4")
+    step5_data = load_step_output(data_storage, abstract_id, "drug_class_step5")
+    dc_validation = load_step_output(data_storage, abstract_id, "drug_class_validation")
+
+    # Build output row
+    output_row = dict(row)
+    output_row.update(transform_drug_extraction(drug_extraction))
+    output_row.update(transform_drug_validation(drug_validation))
+    output_row.update(transform_drug_class_step1(steps1_3_data))
+    output_row.update(transform_drug_class_step2(steps1_3_data))
+    output_row.update(transform_drug_class_step3(steps1_3_data))
+    output_row.update(transform_drug_class_step4(step4_data))
+    output_row.update(transform_drug_class_step5(step5_data))
+
+    # Combined explicit classes: if primary drugs exist, step 5 ran → use its result
+    # (even if empty, since deduplication may have intentionally removed all).
+    # Otherwise step 5 was skipped → use step 4's raw explicit classes.
+    has_primary_drugs = bool(output_row.get("drug_extraction_primary_drugs", ""))
+    if has_primary_drugs:
+        output_row["drug_class_combined_explicit_classes"] = output_row.get(
+            "drug_class_step5_refined_explicit_classes", ""
+        )
+    else:
+        output_row["drug_class_combined_explicit_classes"] = output_row.get(
+            "drug_class_step4_explicit_drug_classes", ""
+        )
+
+    output_row["drug_class_combined_all_classes"] = get_combined_classes(
+        steps1_3_data, step5_data
+    )
+    output_row.update(transform_drug_class_validation(dc_validation))
+
+    # Track which files were found
+    file_stats = {
+        "drug_extraction_found": bool(drug_extraction),
+        "drug_validation_found": bool(drug_validation),
+        "drug_class_steps1_3_found": bool(steps1_3_data),
+        "drug_class_step4_found": bool(step4_data),
+        "drug_class_step5_found": bool(step5_data),
+        "drug_class_validation_found": bool(dc_validation),
+    }
+
+    return (output_row, file_stats)
+
+
+def process_abstracts(rows, fieldnames, data_storage, max_workers: int = 20) -> list[dict]:
     """Process all abstracts and build combined output rows.
+
+    Uses thread pool to parallelize I/O-bound JSON file loading.
 
     Args:
         rows: List of input CSV row dicts
         fieldnames: Column names from input CSV
         data_storage: Storage client for Temporal workflow data
+        max_workers: Number of parallel threads for file loading
 
     Returns:
         List of output row dicts
     """
     id_col = get_abstract_id_column(fieldnames)
-    output_rows = []
 
     stats = {
         "drug_extraction_found": 0,
@@ -491,66 +559,34 @@ def process_abstracts(rows, fieldnames, data_storage) -> list[dict]:
         "drug_class_validation_found": 0,
     }
 
-    for row in tqdm(rows, desc="Processing abstracts", unit="abstract"):
-        abstract_id = row.get(id_col, "") if id_col else ""
+    # Submit all tasks to thread pool
+    futures_to_index = {}
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        for i, row in enumerate(rows):
+            abstract_id = row.get(id_col, "") if id_col else ""
+            future = executor.submit(_load_abstract_data, data_storage, abstract_id, row)
+            futures_to_index[future] = i
 
-        if not abstract_id:
+        # Collect results with progress bar
+        results = [None] * len(rows)
+        for future in tqdm(
+            as_completed(futures_to_index),
+            total=len(futures_to_index),
+            desc="Processing abstracts",
+            unit="abstract",
+        ):
+            idx = futures_to_index[future]
+            results[idx] = future.result()
+
+    # Build output rows in original order
+    output_rows = []
+    for result in results:
+        if result is None:
             continue
-
-        # Start with input columns
-        output_row = dict(row)
-
-        # --- Load all data files ---
-        drug_extraction = load_step_output(data_storage, abstract_id, "drug_extraction")
-        drug_validation = load_step_output(data_storage, abstract_id, "drug_validation")
-        steps1_3_data = load_step_output(data_storage, abstract_id, "drug_class_steps1_3")
-        step4_data = load_step_output(data_storage, abstract_id, "drug_class_step4")
-        step5_data = load_step_output(data_storage, abstract_id, "drug_class_step5")
-        dc_validation = load_step_output(data_storage, abstract_id, "drug_class_validation")
-
-        # --- Track stats ---
-        if drug_extraction:
-            stats["drug_extraction_found"] += 1
-        if drug_validation:
-            stats["drug_validation_found"] += 1
-        if steps1_3_data:
-            stats["drug_class_steps1_3_found"] += 1
-        if step4_data:
-            stats["drug_class_step4_found"] += 1
-        if step5_data:
-            stats["drug_class_step5_found"] += 1
-        if dc_validation:
-            stats["drug_class_validation_found"] += 1
-
-        # --- Drug Extraction ---
-        output_row.update(transform_drug_extraction(drug_extraction))
-
-        # --- Drug Validation ---
-        output_row.update(transform_drug_validation(drug_validation))
-
-        # --- Drug Class Step 1 (from steps1_3) ---
-        output_row.update(transform_drug_class_step1(steps1_3_data))
-
-        # --- Drug Class Step 2 (from steps1_3) ---
-        output_row.update(transform_drug_class_step2(steps1_3_data))
-
-        # --- Drug Class Step 3 (from steps1_3) ---
-        output_row.update(transform_drug_class_step3(steps1_3_data))
-
-        # --- Drug Class Step 4 ---
-        output_row.update(transform_drug_class_step4(step4_data))
-
-        # --- Drug Class Step 5 ---
-        output_row.update(transform_drug_class_step5(step5_data))
-
-        # --- Combined Drug Classes (Step 3 + Step 5) ---
-        output_row["drug_class_combined_all_classes"] = get_combined_classes(
-            steps1_3_data, step5_data
-        )
-
-        # --- Drug Class Validation ---
-        output_row.update(transform_drug_class_validation(dc_validation))
-
+        output_row, file_stats = result
+        for key, found in file_stats.items():
+            if found:
+                stats[key] += 1
         output_rows.append(output_row)
 
     # Print stats

@@ -84,7 +84,7 @@ class Timeouts:
     """Timeout configurations by activity type."""
     
     # Result storage activities - GCS upload (typically <1s)
-    RESULT_STORAGE = timedelta(minutes=1)
+    RESULT_STORAGE = timedelta(minutes=3)
     
     # Extraction progress SQL updates (allow for cold-start connection pool)
     ENTITY_MAPPING_PROGRESS = timedelta(minutes=3)
@@ -96,7 +96,7 @@ class Timeouts:
     SLOW_LLM = timedelta(minutes=5)
     
     # Search activities - Tavily API (typically 2-10s)
-    SEARCH = timedelta(seconds=45)
+    SEARCH = timedelta(minutes=4)
     
     # Batch finalization — reads step JSONs from GCS for all sessions in batch,
     # generates XLSX. drug_class with 20k sessions = ~120k GCS reads (~50 min).
