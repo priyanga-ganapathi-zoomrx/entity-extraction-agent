@@ -1,4 +1,4 @@
-# Vault Path: app-configuration/ferma-congress/prod/entity-extraction-agent-indication-extraction-worker/values.yaml
+# Vault Path: app-configuration/ferma-congress/prod/entity-extraction-agent-result-storage-worker/values.yaml
 # Key: values
 
 chart_version: 3.1.0
@@ -6,18 +6,18 @@ kind: keda
 product: ferma-congress
 
 application_config:
-  name: entity-extraction-agent-indication-extraction-worker
+  name: entity-extraction-agent-result-storage-worker
   type: backend
 
   image:
     name: entity-extraction-agent
 
   resource:
-    preset: micro  # 250m CPU / 512Mi
+    preset: micro  # 250m CPU / 512Mi - I/O bound GCS uploads
 
   entrypoint:
     enabled: true
-    command: "/app/entity-extraction-agent/.venv/bin/python -m src.temporal.workers.indication_extraction_worker"
+    command: "/app/entity-extraction-agent/.venv/bin/python -m src.temporal.workers.result_storage_worker"
 
   filebeat:
     enabled: false
@@ -32,6 +32,6 @@ keda_config:
 
   temporal:
     namespace: entity-extraction-agent
-    taskqueue: indication-extraction
+    taskqueue: result-storage
     endpoint: prod-temporal-server-service.prod-temporal-app.svc.cluster.local:7233
-    queuesize: "15"
+    queuesize: "30"

@@ -322,8 +322,9 @@ LLM pod sizing is based on how many workflows are simultaneously in each LLM sta
 | Recommended connection pool | **80** (60 + headroom) |
 | Queries per second (sustained) | ~40 QPS |
 | Peak queries per second | ~70 QPS (when all slots are active) |
-| Heaviest query | `UPDATE entity_mapping_batches_sessions SET status=? WHERE batch_id=? AND session_id=? AND entity=?` — runs ~920 times/min, 1 row per call |
-| Lightest frequent query | `SELECT COUNT(*) FROM entity_mapping_batches_sessions WHERE batch_id=? AND status IN ('pending','running')` — index-only count, runs ~267 times/min |
+| Most frequent query | `UPDATE entity_mapping_batches_sessions SET status=? WHERE batch_id=? AND session_id=? AND entity=?` — ~920 times/min, 1 row per call (indexed) |
+| Most frequent read | `SELECT COUNT(*) FROM entity_mapping_batches_sessions WHERE batch_id=? AND status IN ('pending','running')` — ~267 times/min, index-only count |
+| Heaviest query | `SELECT entity, status, COUNT(*) FROM entity_mapping_batches_sessions WHERE batch_id=? GROUP BY entity, status` — runs **once per batch** during finalization |
 
 ### Kubernetes Resources
 

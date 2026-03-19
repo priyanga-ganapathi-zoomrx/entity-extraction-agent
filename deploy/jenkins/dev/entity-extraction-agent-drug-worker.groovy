@@ -5,7 +5,7 @@ ferma_congress_dev.call(
   deployment_type: "backend",
   application_name: "entity-extraction-agent-drug-worker",
   chart_version: "v3.1.0",
-  mode_parameters: "build_deploy,deploy,rollback,restart",
+  mode_parameters: "deploy,rollback,restart",
   dockerfile_dir: "deploy/entity-extraction-agent/",
   chart_name: "application_chart",
   image_name: "entity-extraction-agent"

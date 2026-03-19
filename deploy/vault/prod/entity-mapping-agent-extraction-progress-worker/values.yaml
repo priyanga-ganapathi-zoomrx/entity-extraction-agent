@@ -1,4 +1,4 @@
-# Vault Path: app-configuration/ferma-congress/prod/entity-extraction-agent-checkpoint-worker/values.yaml
+# Vault Path: app-configuration/ferma-congress/prod/entity-mapping-agent-extraction-progress-worker/values.yaml
 # Key: values
 
 chart_version: 3.1.0
@@ -6,18 +6,18 @@ kind: keda
 product: ferma-congress
 
 application_config:
-  name: entity-extraction-agent-checkpoint-worker
+  name: entity-mapping-agent-extraction-progress-worker
   type: backend
 
   image:
     name: entity-extraction-agent
 
   resource:
-    preset: nano  # 100m CPU / 128Mi
+    preset: small  # 500m CPU / 1024Mi - DB queries, 30K row aggregates
 
   entrypoint:
     enabled: true
-    command: "python -m src.temporal.workers.checkpoint_worker"
+    command: "/app/entity-extraction-agent/.venv/bin/python -m src.temporal.workers.extraction_progress_worker"
 
   filebeat:
     enabled: false
@@ -27,11 +27,11 @@ application_config:
 
 keda_config:
   type: temporal
-  max_replicas: 2
+  max_replicas: 3
   pollingInterval: 15
 
   temporal:
     namespace: entity-extraction-agent
-    taskqueue: checkpoint-storage
+    taskqueue: entity-mapping-progress
     endpoint: prod-temporal-server-service.prod-temporal-app.svc.cluster.local:7233
-    queuesize: "30"
+    queuesize: "10"

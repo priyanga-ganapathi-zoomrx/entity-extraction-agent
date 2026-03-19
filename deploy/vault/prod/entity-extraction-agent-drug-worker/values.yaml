@@ -17,7 +17,7 @@ application_config:
 
   entrypoint:
     enabled: true
-    command: "python -m src.temporal.workers.drug_worker"
+    command: "/app/entity-extraction-agent/.venv/bin/python -m src.temporal.workers.drug_worker"
 
   filebeat:
     enabled: false

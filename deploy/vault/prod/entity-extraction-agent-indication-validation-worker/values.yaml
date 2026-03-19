@@ -17,7 +17,7 @@ application_config:
 
   entrypoint:
     enabled: true
-    command: "python -m src.temporal.workers.indication_validation_worker"
+    command: "/app/entity-extraction-agent/.venv/bin/python -m src.temporal.workers.indication_validation_worker"
 
   filebeat:
     enabled: false
@@ -27,7 +27,7 @@ application_config:
 
 keda_config:
   type: temporal
-  max_replicas: 17
+  max_replicas: 7
   pollingInterval: 15
 
   temporal:

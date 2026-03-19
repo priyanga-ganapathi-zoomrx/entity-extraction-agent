@@ -1,9 +1,9 @@
 @Library('congress-ci-cd@main') _
 
-ferma_congress_dev.call(
+ferma_congress_zeus.call(
   repo_url: "https://github.com/ZoomRx/entity-extraction-agent.git",
   deployment_type: "backend",
-  application_name: "entity-extraction-agent-indication-validation-worker",
+  application_name: "entity-mapping-agent-extraction-progress-worker",
   chart_version: "v3.1.0",
   mode_parameters: "deploy,rollback,restart",
   dockerfile_dir: "deploy/entity-extraction-agent/",
