@@ -159,26 +159,25 @@ At steady state, with 82 indication + 150 drug workflows running in parallel:
 | `update_progress` (indication) | ~148/min | 5s | ~12.3 |
 | `update_progress` (drug + drug_class) | ~772/min | 5s | ~64.3 |
 | `check_and_finalize_batch` | ~267/min | 5s | ~22.3 |
-| **Total** | **~1,187/min** | | **~49 slots needed** |
+| **Total** | **~1,187/min** | | **~99 slots needed** |
 
 > **Calculation:** Avg concurrent = (activities/min × duration in seconds) / 60
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                                                                 │
-│   Max concurrent DB connections:    60  (hard ceiling,          │
-│                                         3 pods × 20 each)      │
-│                                                                 │
-│   Typical concurrent connections:   ~49 (steady state average)  │
+│   Steady-state demand (at 5s):      ~99 concurrent slots        │
 │                                                                 │
 │   DB activity tasks per minute:     ~1,187                      │
 │                                                                 │
-│   DB queries per minute:            ~2,908                      │
+│   DB queries per minute:            ~2,374                      │
 │                                                                 │
-│   Peak (all slots full):            60  (same as max — worker   │
-│                                         is the ceiling)         │
+│   At 5s latency:  5 pods needed (100 slots, ~1% headroom)      │
+│   At 3s latency:  3 pods needed  (60 slots, ~2% headroom)      │
+│   At 1s latency:  1 pod needed   (20 slots, ~1% headroom)      │
 │                                                                 │
-│   Worker utilization:               ~82% (49/60)                │
+│   Recommendation: Start with 3 pods (assumes ~3s actual         │
+│                   latency), measure, then adjust.               │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -318,8 +317,9 @@ LLM pod sizing is based on how many workflows are simultaneously in each LLM sta
 
 | Metric | Value |
 |---|---|
-| Max concurrent connections needed | **60** (3 pods × 20 each) |
-| Recommended connection pool | **80** (60 + headroom) |
+| Concurrent connections (3 pods) | **60** (3 pods × 20 each — sufficient at ~3s latency) |
+| Concurrent connections (5 pods) | **100** (5 pods × 20 each — needed at 5s latency) |
+| Recommended connection pool | **80-120** (capacity + headroom, depends on measured latency) |
 | Queries per second (sustained) | ~40 QPS |
 | Peak queries per second | ~70 QPS (when all slots are active) |
 | Most frequent query | `UPDATE entity_mapping_batches_sessions SET status=? WHERE batch_id=? AND session_id=? AND entity=?` — ~920 times/min, 1 row per call (indexed) |
@@ -359,7 +359,7 @@ All workers use KEDA with Temporal task queue scaling. When no batch is running,
 
 3. **AI rate limits are the real bottleneck, not infrastructure.** Claude's 3M tokens/min limit caps indication throughput at ~82 abstracts/min. Gemini's 10M tokens/min limit caps drug throughput at ~150 abstracts/min. Pod counts are sized to match these limits — scaling beyond them provides no benefit.
 
-4. **DB latency is the key variable for progress worker sizing.** At 5s per operation, 3 pods are needed. At 1-2s, a single pod is sufficient. Measure actual production latency before finalizing pod count (see Section 11).
+4. **DB latency is the key variable for progress worker sizing.** At 5s per operation, 5 pods are needed. At ~3s, 3 pods suffice. At 1-2s, a single pod is sufficient. Measure actual production latency before finalizing pod count (see Section 11).
 
 5. **No startup burst.** When a batch of 20,000 workflows starts, Temporal's task queue absorbs all pending DB activities. The progress workers drain them at their configured rate (60 concurrent total), not all at once.
 
