@@ -279,7 +279,7 @@ class AbstractExtractionWorkflow:
                     CheckAndFinalizeInput(
                         batch_id=input.batch_id, congress_id=input.congress_id
                     ),
-                    task_queue=TaskQueues.RESULT_STORAGE,
+                    task_queue=TaskQueues.ENTITY_MAPPING_PROGRESS,
                     start_to_close_timeout=Timeouts.BATCH_FINALIZATION,
                     retry_policy=RetryPolicies.BATCH_FINALIZATION,
                 )

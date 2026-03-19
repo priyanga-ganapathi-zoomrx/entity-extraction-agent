@@ -21,6 +21,7 @@ load_dotenv()
 
 from src.temporal.config import TaskQueues, WorkerSettings
 from src.temporal.activities.extraction_progress import update_extraction_progress
+from src.temporal.activities.check_and_finalize_batch import check_and_finalize_batch
 from src.temporal.workers.base import run_worker
 
 logger = logging.getLogger(__name__)
@@ -35,7 +36,7 @@ async def run_extraction_progress_worker(idle_shutdown_minutes: float | None = N
     await run_worker(
         task_queue=TaskQueues.ENTITY_MAPPING_PROGRESS,
         workflows=None,
-        activities=[update_extraction_progress],
+        activities=[update_extraction_progress, check_and_finalize_batch],
         max_concurrent_activities=settings.get("max_concurrent_activities", 20),
         idle_shutdown_minutes=idle_shutdown_minutes,
     )

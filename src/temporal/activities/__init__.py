@@ -23,21 +23,21 @@ for non-Temporal use cases.
 # =============================================================================
 
 from src.temporal.activities.result_storage import save_step_output
-from src.temporal.activities.check_and_finalize_batch import check_and_finalize_batch
 
 RESULT_STORAGE_ACTIVITIES = [
     save_step_output,
-    check_and_finalize_batch,
 ]
 
 # =============================================================================
-# EXTRACTION PROGRESS ACTIVITIES (SQL status updates)
+# EXTRACTION PROGRESS ACTIVITIES (SQL status updates + batch finalization)
 # =============================================================================
 
 from src.temporal.activities.extraction_progress import update_extraction_progress
+from src.temporal.activities.check_and_finalize_batch import check_and_finalize_batch
 
 EXTRACTION_PROGRESS_ACTIVITIES = [
     update_extraction_progress,
+    check_and_finalize_batch,
 ]
 
 # =============================================================================
@@ -109,10 +109,10 @@ ALL_ACTIVITIES = (
 __all__ = [
     # Result storage activities
     "save_step_output",
-    "check_and_finalize_batch",
     "RESULT_STORAGE_ACTIVITIES",
     # Extraction progress activities
     "update_extraction_progress",
+    "check_and_finalize_batch",
     "EXTRACTION_PROGRESS_ACTIVITIES",
     # Drug activities
     "extract_drugs",
