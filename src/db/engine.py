@@ -1,36 +1,33 @@
 """Database engine and session factory.
 
-Fetches MySQL credentials from GCS (fc-{ENVIRONMENT}-secrets/creds.json)
-and delegates session management to cgutils.db.
+Reads MySQL credentials from environment variables (DB_HOST, DB_PORT,
+DB_USERNAME, DB_PASSWORD, DB_DATABASE) and delegates session management
+to cgutils.db.
 """
 
 from contextlib import contextmanager
-from functools import lru_cache
-from json import loads
 from os import getenv
 from typing import Generator
 
 from sqlalchemy.orm import Session
 
+_REQUIRED_VARS = ("DB_HOST", "DB_USERNAME", "DB_PASSWORD", "DB_DATABASE")
 
-@lru_cache(maxsize=1)
+
 def _get_db_config() -> dict:
-    """Fetch MySQL creds from GCS and return a cgutils db_config dict."""
-    from google.cloud import storage
+    """Build a cgutils db_config dict from environment variables."""
+    missing = [v for v in _REQUIRED_VARS if not getenv(v)]
+    if missing:
+        raise RuntimeError(
+            f"Missing required environment variable(s): {', '.join(missing)}"
+        )
 
-    env = getenv("ENVIRONMENT")
-    bucket = storage.Client().get_bucket(f"fc-{env}-secrets")
-    blob = bucket.get_blob("creds.json")
-    if blob is None:
-        raise RuntimeError(f"creds.json not found in fc-{env}-secrets")
-
-    mysql = loads(blob.download_as_string().decode("utf-8"))["mysql"]
     return {
-        "host": mysql["ext_host"],
-        "port": mysql.get("port", 3306),
-        "username": mysql["username"],
-        "password": mysql["password"],
-        "database": mysql["fc_management_db"],
+        "host": getenv("DB_HOST"),
+        "port": int(getenv("DB_PORT", "3306")),
+        "username": getenv("DB_USERNAME"),
+        "password": getenv("DB_PASSWORD"),
+        "database": getenv("DB_DATABASE"),
     }
 
 
