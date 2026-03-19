@@ -1,4 +1,4 @@
-# Vault Path: app-configuration/ferma-congress/dev/entity-extraction-agent-checkpoint-worker/values.yaml
+# Vault Path: app-configuration/ferma-congress/dev/entity-extraction-agent-result-storage-worker/values.yaml
 # Key: values
 
 chart_version: 3.1.0
@@ -6,7 +6,7 @@ kind: keda
 product: ferma-congress
 
 application_config:
-  name: entity-extraction-agent-checkpoint-worker
+  name: entity-extraction-agent-result-storage-worker
   type: backend
 
   image:
