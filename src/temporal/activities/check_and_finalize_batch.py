@@ -11,6 +11,7 @@ around the same time) and idempotent for Temporal retries.
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+from sqlalchemy import func
 from temporalio import activity
 
 from src.agents.core.config import settings
@@ -63,30 +64,36 @@ def check_and_finalize_batch(input: CheckAndFinalizeInput) -> None:
             )
             return
 
-        # ── Step 2: Check if all sessions are done ──
-        batch_sessions = (
+        # ── Step 2: Fast check — any sessions still in progress? ──
+        incomplete_count = (
+            db.query(func.count(EntityMappingBatchesSessions.id))
+            .filter_by(batch_id=batch_id)
+            .filter(EntityMappingBatchesSessions.status.in_(("pending", "running")))
+            .scalar()
+        )
+
+        if incomplete_count > 0:
+            activity.logger.info(
+                f"Batch {batch_id}: {incomplete_count} sessions still in progress, skipping"
+            )
+            return
+
+        # ── Step 3: Determine batch status (lightweight GROUP BY) ──
+        status_counts = (
             db.query(
-                EntityMappingBatchesSessions.session_id,
-                EntityMappingBatchesSessions.entity,
                 EntityMappingBatchesSessions.status,
+                func.count(EntityMappingBatchesSessions.id),
             )
             .filter_by(batch_id=batch_id)
+            .group_by(EntityMappingBatchesSessions.status)
             .all()
         )
 
-        if not batch_sessions:
+        if not status_counts:
             activity.logger.warning(f"No batch_sessions for batch {batch_id}")
             return
 
-        statuses = [row.status for row in batch_sessions]
-        if any(s in ("pending", "running") for s in statuses):
-            activity.logger.info(
-                f"Batch {batch_id}: sessions still in progress, skipping"
-            )
-            return
-
-        # ── Step 3: Determine batch status ──
-        status_set = set(statuses)
+        status_set = {row[0] for row in status_counts}
         if status_set == {"success"}:
             final_status = "completed"
         elif status_set == {"failed"}:
@@ -129,6 +136,27 @@ def check_and_finalize_batch(input: CheckAndFinalizeInput) -> None:
 
         batch_created_at = batch.created_at
 
+        # ── Step 4c: Per-entity status counts for notification ──
+        entity_status_counts = (
+            db.query(
+                EntityMappingBatchesSessions.entity,
+                EntityMappingBatchesSessions.status,
+                func.count(EntityMappingBatchesSessions.id),
+            )
+            .filter_by(batch_id=batch_id)
+            .group_by(
+                EntityMappingBatchesSessions.entity,
+                EntityMappingBatchesSessions.status,
+            )
+            .all()
+        )
+
+        total_sessions = (
+            db.query(func.count(func.distinct(EntityMappingBatchesSessions.session_id)))
+            .filter_by(batch_id=batch_id)
+            .scalar()
+        )
+
     # ── Step 5: Skip XLSX if no successful sessions ──
     if final_status in ("failed", "aborted"):
         activity.logger.info(
@@ -149,7 +177,8 @@ def check_and_finalize_batch(input: CheckAndFinalizeInput) -> None:
     # ── Step 7: Send Teams notification (after XLSX generation) ──
     try:
         _send_batch_notification(
-            congress_name, batch_id, final_status, entities, batch_sessions,
+            congress_name, batch_id, final_status, entities,
+            entity_status_counts, total_sessions,
             triggered_by_name, batch_created_at, now,
         )
     except Exception:
@@ -260,7 +289,8 @@ def _send_batch_notification(
     batch_id: int,
     final_status: str,
     entities: list[str],
-    batch_sessions: list,
+    entity_status_counts: list,
+    total_sessions: int,
     triggered_by: str | None,
     created_at: datetime | None,
     completed_at: datetime,
@@ -269,12 +299,12 @@ def _send_batch_notification(
     from src.temporal.utils.teams_notify import format_facts, send_teams_message
 
     entity_counts: dict[str, dict[str, int]] = {}
-    for row in batch_sessions:
-        counts = entity_counts.setdefault(row.entity, {"success": 0, "failed": 0, "aborted": 0})
-        if row.status in counts:
-            counts[row.status] += 1
+    for entity, status, count in entity_status_counts:
+        counts = entity_counts.setdefault(entity, {"success": 0, "failed": 0, "aborted": 0})
+        if status in counts:
+            counts[status] = count
 
-    total = len({row.session_id for row in batch_sessions})
+    total = total_sessions
     status_emoji = {"completed": "✅", "partial": "⚠️", "failed": "❌", "aborted": "🚫"}
     emoji = status_emoji.get(final_status, "ℹ️")
 

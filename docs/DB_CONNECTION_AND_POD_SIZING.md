@@ -211,10 +211,11 @@ With 5s per DB operation:
 | Activity | Calls/Min | Queries/Call | Total Queries/Min | Rows Read/Call |
 |---|---|---|---|---|
 | `update_progress` | ~920 | 2 (UPDATE + UPSERT) | ~1,840 | 1 |
-| `check_and_finalize` | ~267 | 4 (SELECT batch + SELECT all sessions + conditional UPDATE) | ~1,068 | **30,000** |
-| **Total** | **~1,187** | | **~2,908** | |
+| `check_and_finalize` (early return) | ~267 | 2 (SELECT batch + SELECT COUNT WHERE status IN pending/running) | ~534 | **~0** (index count) |
+| `check_and_finalize` (finalization) | once per batch | 5 (SELECT batch + COUNT + GROUP BY status + UPDATE + GROUP BY entity/status) | ~5 | **~0** (aggregates only) |
+| **Total** | **~1,187** | | **~2,374** | |
 
-**Note on `check_and_finalize_batch`:** Each call reads all session rows for the batch (30,000 rows for a 10K session batch with 3 entities) to check if every session is done. At ~267 calls/min, this is **~8 million rows read per minute**. The query is lightweight (indexed SELECT), but this volume is worth monitoring.
+**Optimization: `check_and_finalize_batch` uses `SELECT COUNT(*) WHERE status IN ('pending', 'running')`** instead of fetching all 30K rows. Since 99% of calls find incomplete sessions and return early, MySQL only counts matching rows via index — typically returning a single integer. The heavy queries (GROUP BY for status determination, per-entity counts for notifications) only run **once per batch** when the last workflow completes, not ~267 times/min.
 
 ---
 
@@ -224,9 +225,11 @@ For a 10,000-session congress extracting all 3 entity types:
 
 | Phase | Duration | DB Activity Tasks | DB Queries | Rows Read |
 |---|---|---|---|---|
-| Indication workflows | ~2.5 hrs | ~22,200 | ~59,400 | ~500M |
-| Drug workflows | ~1.5 hrs | ~45,000 | ~103,500 | ~600M |
-| **Total** | **~4 hrs** | **~67,200** | **~162,900** | **~1.1 billion** |
+| Indication workflows | ~2.5 hrs | ~22,200 | ~59,400 | ~30K (lightweight) |
+| Drug workflows | ~1.5 hrs | ~45,000 | ~103,500 | ~50K (lightweight) |
+| **Total** | **~4 hrs** | **~67,200** | **~162,900** | **~80K** |
+
+Row reads are minimal because `check_and_finalize_batch` uses `SELECT COUNT(*)` with indexed columns instead of fetching all rows. The only full-table aggregations happen once per batch during finalization.
 
 All of this runs through **at most 60 concurrent DB connections** at any given moment.
 
@@ -317,9 +320,10 @@ LLM pod sizing is based on how many workflows are simultaneously in each LLM sta
 |---|---|
 | Max concurrent connections needed | **60** (3 pods × 20 each) |
 | Recommended connection pool | **80** (60 + headroom) |
-| Queries per second (sustained) | ~48 QPS |
-| Peak queries per second | ~80 QPS (when all slots are active) |
-| Heaviest query | `SELECT ... FROM entity_mapping_batches_sessions WHERE batch_id = ?` — reads up to 30K rows, runs ~267 times/min |
+| Queries per second (sustained) | ~40 QPS |
+| Peak queries per second | ~70 QPS (when all slots are active) |
+| Heaviest query | `UPDATE entity_mapping_batches_sessions SET status=? WHERE batch_id=? AND session_id=? AND entity=?` — runs ~920 times/min, 1 row per call |
+| Lightest frequent query | `SELECT COUNT(*) FROM entity_mapping_batches_sessions WHERE batch_id=? AND status IN ('pending','running')` — index-only count, runs ~267 times/min |
 
 ### Kubernetes Resources
 
@@ -328,7 +332,7 @@ LLM pod sizing is based on how many workflows are simultaneously in each LLM sta
 | Workflow worker | micro (250m CPU / 512Mi) | Lightweight coordination, no I/O |
 | LLM workers | small (500m CPU / 1Gi) | Network I/O for API calls, JSON processing |
 | Result storage | micro (250m CPU / 512Mi) | GCS upload, I/O bound |
-| Extraction progress | small (500m CPU / 1Gi) | DB queries, handles 30K row reads |
+| Extraction progress | small (500m CPU / 1Gi) | DB queries, index-based counts + updates |
 
 ### KEDA Autoscaling
 
@@ -368,9 +372,8 @@ The 5s DB operation estimate is a conservative upper bound. **The actual progres
 
 | Metric | Where | Why It Matters |
 |---|---|---|
-| `update_extraction_progress` end-to-end | Activity code | 75% of DB calls (~920/min) |
-| `check_and_finalize_batch` read phase | Activity code | Scans 30K rows — likely the slowest |
-| `check_and_finalize_batch` write phase | Activity code | Single UPDATE by PK — should be fast |
+| `update_extraction_progress` end-to-end | Activity code | 75% of DB calls (~920/min) — 1 UPDATE + 1 UPSERT |
+| `check_and_finalize_batch` early return | Activity code | ~267 calls/min — SELECT batch + SELECT COUNT (index-only, very fast) |
 | Connection pool checkout time | `get_session()` | Adds to every operation if pool is saturated |
 
 ### How to Measure
@@ -383,20 +386,22 @@ import time
 # In update_extraction_progress:
 start = time.time()
 with get_session() as db:
-    # ... existing queries ...
+    # ... existing UPDATE + UPSERT queries ...
 elapsed = time.time() - start
 activity.logger.info(f"update_progress DB latency: {elapsed:.3f}s")
 
 # In check_and_finalize_batch:
 start = time.time()
 with get_session() as db:
-    batch = db.query(...).first()
-    batch_sessions = db.query(...).filter_by(batch_id=...).all()
-read_elapsed = time.time() - start
-activity.logger.info(f"check_finalize read latency: {read_elapsed:.3f}s (batch_sessions: {len(batch_sessions)} rows)")
+    batch = db.query(...).first()                          # SELECT by PK
+    incomplete = db.query(func.count(...)).filter(...).scalar()  # COUNT with index
+elapsed = time.time() - start
+activity.logger.info(f"check_finalize early-return latency: {elapsed:.3f}s (incomplete: {incomplete})")
 ```
 
 Run a small test batch (200-500 sessions) and collect the P50/P95/P99 latency values.
+
+**Note:** With the optimized COUNT query, `check_and_finalize_batch` should be significantly faster than `update_extraction_progress` (which does writes). The 5s estimate may be overly conservative for this activity — expect sub-second for the early-return path.
 
 ### Pod Count Decision Matrix
 
