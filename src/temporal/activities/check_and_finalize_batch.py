@@ -58,6 +58,14 @@ def check_and_finalize_batch(input: CheckAndFinalizeInput) -> None:
         if not batch:
             activity.logger.warning(f"Batch {batch_id} not found, skipping")
             return
+
+        # Read entities while session is open (avoids DetachedInstanceError)
+        entities = batch.entities or []
+
+        if batch.status == "aborted":
+            _handle_aborted_batch(db, batch_id, congress_id, entities)
+            return
+
         if batch.status != "running":
             activity.logger.info(
                 f"Batch {batch_id} status is '{batch.status}' (not 'running'), skipping"
@@ -121,9 +129,6 @@ def check_and_finalize_batch(input: CheckAndFinalizeInput) -> None:
             f"Batch {batch_id} finalized as '{final_status}'"
         )
 
-        # Read entities while session is still open (avoids DetachedInstanceError)
-        entities = batch.entities or []
-
         # ── Step 4b: Gather notification data (while session is open) ──
         congress_row = db.query(Congresses.name).filter_by(id=congress_id).first()
         congress_name = congress_row.name if congress_row else f"Congress {congress_id}"
@@ -186,6 +191,58 @@ def check_and_finalize_batch(input: CheckAndFinalizeInput) -> None:
             f"Batch {batch_id}: Teams notification failed, continuing",
             exc_info=True,
         )
+
+
+def _handle_aborted_batch(
+    db,
+    batch_id: int,
+    congress_id: int,
+    entities: list[str],
+) -> None:
+    """Handle XLSX generation for aborted batches that have successful sessions.
+
+    Called when batch.status is already "aborted" (set by AP server).
+    Does NOT update batch status or completed_at. Does NOT send Teams notification.
+    """
+    # Guard: any sessions still in progress? (workflows haven't finished cleanup)
+    incomplete_count = (
+        db.query(func.count(EntityMappingBatchesSessions.id))
+        .filter_by(batch_id=batch_id)
+        .filter(EntityMappingBatchesSessions.status.in_(("pending", "running")))
+        .scalar()
+    )
+    if incomplete_count > 0:
+        activity.logger.info(
+            f"Aborted batch {batch_id}: {incomplete_count} sessions still in progress, "
+            "skipping XLSX generation"
+        )
+        return
+
+    # Guard: any successful sessions to export?
+    success_count = (
+        db.query(func.count(EntityMappingBatchesSessions.id))
+        .filter_by(batch_id=batch_id, status="success")
+        .scalar()
+    )
+    if success_count == 0:
+        activity.logger.info(
+            f"Aborted batch {batch_id}: no successful sessions, skipping XLSX generation"
+        )
+        return
+
+    activity.logger.info(
+        f"Aborted batch {batch_id}: {success_count} successful sessions, "
+        "generating XLSX files"
+    )
+
+    storage = GCSStorageClient(settings.gcs.GCS_BUCKET_NAME)
+    for entity in entities:
+        _generate_batch_xlsx(storage, congress_id, batch_id, entity)
+        _generate_congress_xlsx(storage, congress_id, entity)
+
+    activity.logger.info(
+        f"Aborted batch {batch_id}: XLSX generation complete for entities={entities}"
+    )
 
 
 def _generate_batch_xlsx(
