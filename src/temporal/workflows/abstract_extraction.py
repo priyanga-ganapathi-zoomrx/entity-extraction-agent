@@ -419,6 +419,25 @@ class AbstractExtractionWorkflow:
                     f"Failed to update drug_class abort status for {input.abstract_id}"
                 )
 
+        # Check if batch is done and generate XLSX for any successful sessions
+        try:
+            await asyncio.shield(
+                workflow.execute_activity(
+                    "check_and_finalize_batch",
+                    CheckAndFinalizeInput(
+                        batch_id=input.batch_id, congress_id=input.congress_id
+                    ),
+                    task_queue=TaskQueues.ENTITY_MAPPING_PROGRESS,
+                    start_to_close_timeout=Timeouts.BATCH_FINALIZATION,
+                    retry_policy=RetryPolicies.BATCH_FINALIZATION,
+                )
+            )
+        except Exception:
+            workflow.logger.warning(
+                f"Failed to check batch finalization for {input.abstract_id}, "
+                "XLSX may need manual generation"
+            )
+
     # =========================================================================
     # PROGRESS HELPERS
     # =========================================================================
