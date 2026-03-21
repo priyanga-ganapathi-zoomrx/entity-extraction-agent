@@ -8,6 +8,7 @@ Reuses transform functions from src/scripts/temporal/ exporters.
 
 import io
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Union
 
 from openpyxl import Workbook
@@ -114,8 +115,8 @@ ENTITY_TRANSFORMS = {
 
 def _rows_to_xlsx(columns: list[str], rows: list[dict]) -> bytes:
     """Convert list of row dicts to XLSX bytes."""
-    wb = Workbook()
-    ws = wb.active
+    wb = Workbook(write_only=True)
+    ws = wb.create_sheet()
     ws.append(columns)
     for row in rows:
         ws.append([row.get(col, "") for col in columns])
@@ -154,6 +155,31 @@ def _load_step_data(
 # ── Public API ──────────────────────────────────────────────────────
 
 
+def _load_session_row(
+    storage: Union[GCSStorageClient, LocalStorageClient],
+    congress_id: int,
+    batch_id: int,
+    entity: str,
+    session_id: int,
+    session_info: dict[int, dict[str, str]],
+    transform_fn,
+) -> dict:
+    """Load step data and transform a single session into a row dict.
+
+    Designed to run inside a ThreadPoolExecutor — all inputs are
+    read-only and the function has no shared mutable state.
+    """
+    info = session_info.get(session_id, {})
+    step_data = _load_step_data(storage, congress_id, batch_id, entity, session_id)
+    row = {
+        "session_id": session_id,
+        "title": info.get("title", ""),
+        "abstract": info.get("abstract", ""),
+    }
+    row.update(transform_fn(step_data))
+    return row
+
+
 def generate_entity_xlsx(
     storage: Union[GCSStorageClient, LocalStorageClient],
     congress_id: int,
@@ -175,22 +201,24 @@ def generate_entity_xlsx(
     """
     columns = ENTITY_COLUMNS[entity]
     transform_fn = ENTITY_TRANSFORMS[entity]
-    rows = []
 
-    for session_id, batch_id in session_batch_map.items():
-        info = session_info.get(session_id, {})
+    items = list(session_batch_map.items())
+    results: list[dict | None] = [None] * len(items)
 
-        # Load step JSON files from GCS
-        step_data = _load_step_data(storage, congress_id, batch_id, entity, session_id)
+    with ThreadPoolExecutor(max_workers=20) as executor:
+        futures_to_index: dict = {}
+        for i, (session_id, batch_id) in enumerate(items):
+            future = executor.submit(
+                _load_session_row,
+                storage, congress_id, batch_id, entity,
+                session_id, session_info, transform_fn,
+            )
+            futures_to_index[future] = i
 
-        # Transform to row
-        row = {
-            "session_id": session_id,
-            "title": info.get("title", ""),
-            "abstract": info.get("abstract", ""),
-        }
-        row.update(transform_fn(step_data))
-        rows.append(row)
+        for future in as_completed(futures_to_index):
+            results[futures_to_index[future]] = future.result()
+
+    rows = [r for r in results if r is not None]
 
     logger.info(
         f"Generated {entity} XLSX: {len(rows)} rows, congress={congress_id}"
