@@ -4,6 +4,7 @@ Pattern replicated from congress-content-utilities/ms_teams.py.
 Webhook URL loaded from TEAMS_WEBHOOK_URL environment variable.
 """
 
+import json
 import logging
 from os import getenv
 
@@ -57,17 +58,20 @@ def send_teams_message(title: str, message: str) -> None:
         elif line:
             body_blocks.append({"type": "TextBlock", "text": line, "wrap": True})
 
+    adaptive_card = {
+        "type": "AdaptiveCard",
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "version": "1.4",
+        "body": body_blocks,
+    }
+
     card_payload = {
         "type": "message",
         "attachments": [
             {
                 "contentType": "application/vnd.microsoft.card.adaptive",
-                "content": {
-                    "type": "AdaptiveCard",
-                    "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-                    "version": "1.4",
-                    "body": body_blocks,
-                },
+                "contentUrl": None,
+                "content": json.dumps(adaptive_card),
             }
         ],
     }
