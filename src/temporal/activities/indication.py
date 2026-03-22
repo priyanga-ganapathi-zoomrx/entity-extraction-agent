@@ -242,19 +242,18 @@ def extract_indication(input_data: IndicationInput) -> dict:
     tracker = TokenUsageCallbackHandler()
     start = time.time()
 
+    activity_logger = ActivityLogger(
+        step_name="indication_extraction",
+        entity="indication",
+        activity="extract",
+        input_data=input_data,
+        model=ind_config.LLM_MODEL,
+    )
+
     try:
         rules_data = _get_rules_data(input_data.rules_file_path)
         agent = IndicationAgent(rules_data=rules_data)
-
-        # Initialize ActivityLogger with prompt_file from agent
-        activity_logger = ActivityLogger(
-            step_name="indication_extraction",
-            entity="indication",
-            activity="extract",
-            input_data=input_data,
-            model=ind_config.LLM_MODEL,
-            prompt_file=agent.prompt_file,
-        )
+        activity_logger.prompt_file = agent.prompt_file
 
         raw_result = agent.invoke(
             abstract_title=input_data.abstract_title,
@@ -296,7 +295,6 @@ def extract_indication(input_data: IndicationInput) -> dict:
     except Exception as e:
         duration_ms = int((time.time() - start) * 1000)
 
-        # Log error with ECS format
         activity_logger.log_error(
             error=e,
             labels={
@@ -371,19 +369,18 @@ def validate_indication(
     tracker = TokenUsageCallbackHandler()
     start = time.time()
 
+    activity_logger = ActivityLogger(
+        step_name="indication_validation",
+        entity="indication",
+        activity="validate",
+        input_data=input_data,
+        model=ind_config.VALIDATION_LLM_MODEL,
+    )
+
     try:
         rules_data = _get_rules_data(input_data.rules_file_path)
         agent = IndicationValidationAgent(rules_data=rules_data)
-
-        # Initialize ActivityLogger with prompt_file from agent
-        activity_logger = ActivityLogger(
-            step_name="indication_validation",
-            entity="indication",
-            activity="validate",
-            input_data=input_data,
-            model=ind_config.VALIDATION_LLM_MODEL,
-            prompt_file=agent.prompt_file,
-        )
+        activity_logger.prompt_file = agent.prompt_file
 
         raw_result = agent.invoke(
             session_title=input_data.session_title,
@@ -426,7 +423,6 @@ def validate_indication(
     except Exception as e:
         duration_ms = int((time.time() - start) * 1000)
 
-        # Log error with ECS format
         activity_logger.log_error(
             error=e,
             labels={

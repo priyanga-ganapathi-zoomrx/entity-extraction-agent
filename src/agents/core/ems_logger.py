@@ -430,15 +430,15 @@ class ActivityLogger:
         self,
         output: dict,
         labels: dict,
-        tracker,
-        duration_ms: int,
+        tracker=None,
+        duration_ms: int = 0,
     ) -> None:
         """Log a successful activity completion.
 
         Args:
             output: Activity output as dict (e.g. {"drugs": ["aspirin"]})
             labels: Additional metadata labels as dict
-            tracker: TokenUsageCallbackHandler instance
+            tracker: TokenUsageCallbackHandler instance (optional for non-LLM activities)
             duration_ms: Activity duration in milliseconds
         """
         transaction = self._build_transaction()
@@ -451,18 +451,21 @@ class ActivityLogger:
             error="",
             attempt=1,
             labels=labels,
-            llm_calls=tracker.llm_calls,
+            llm_calls=tracker.llm_calls if tracker else 0,
             status="success",
             duration=duration_ms,
         )
 
-        llm = LLMLogSchema(
-            model=self.model,
-            prompt_file=self.prompt_file,
-            input_tokens=tracker.usage.input_tokens,
-            output_tokens=tracker.usage.output_tokens,
-            total_tokens=tracker.usage.total_tokens,
-        )
+        if tracker:
+            llm = LLMLogSchema(
+                model=self.model,
+                prompt_file=self.prompt_file,
+                input_tokens=tracker.usage.input_tokens,
+                output_tokens=tracker.usage.output_tokens,
+                total_tokens=tracker.usage.total_tokens,
+            )
+        else:
+            llm = None
 
         log_event = build_ecs_log_event(transaction, event_details, llm)
         self.logger.info("step_completed", **log_event)
@@ -471,15 +474,15 @@ class ActivityLogger:
         self,
         error: Exception,
         labels: dict,
-        tracker,
-        duration_ms: int,
+        tracker=None,
+        duration_ms: int = 0,
     ) -> None:
         """Log a failed activity execution.
 
         Args:
             error: Exception that caused the failure
             labels: Additional metadata labels as dict
-            tracker: TokenUsageCallbackHandler instance
+            tracker: TokenUsageCallbackHandler instance (optional for non-LLM activities)
             duration_ms: Activity duration in milliseconds
         """
         transaction = self._build_transaction()
@@ -492,18 +495,21 @@ class ActivityLogger:
             error=str(error),
             attempt=1,
             labels=labels,
-            llm_calls=tracker.llm_calls,
+            llm_calls=tracker.llm_calls if tracker else 0,
             status="failed",
             duration=duration_ms,
         )
 
-        llm = LLMLogSchema(
-            model=self.model,
-            prompt_file=self.prompt_file,
-            input_tokens=tracker.usage.input_tokens,
-            output_tokens=tracker.usage.output_tokens,
-            total_tokens=tracker.usage.total_tokens,
-        )
+        if tracker:
+            llm = LLMLogSchema(
+                model=self.model,
+                prompt_file=self.prompt_file,
+                input_tokens=tracker.usage.input_tokens,
+                output_tokens=tracker.usage.output_tokens,
+                total_tokens=tracker.usage.total_tokens,
+            )
+        else:
+            llm = None
 
         log_event = build_ecs_log_event(transaction, event_details, llm)
         self.logger.error("step_failed", **log_event, exc_info=True)

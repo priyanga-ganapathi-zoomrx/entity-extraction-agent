@@ -8,6 +8,7 @@ Designed to be safe for concurrent calls (multiple workflows finishing
 around the same time) and idempotent for Temporal retries.
 """
 
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -15,6 +16,7 @@ from sqlalchemy import func
 from temporalio import activity
 
 from src.agents.core.config import settings
+from src.agents.core.ems_logger import ActivityLogger
 from src.agents.core.storage import GCSStorageClient
 from src.db import (
     Congresses,
@@ -37,6 +39,16 @@ class CheckAndFinalizeInput:
     congress_id: int
 
 
+@dataclass
+class _BatchLogInput:
+    """Lightweight input schema for ActivityLogger compatibility."""
+
+    abstract_id: str
+    abstract_title: str
+    congress_id: int
+    batch_id: int
+
+
 @activity.defn(name="check_and_finalize_batch")
 @track_activity
 def check_and_finalize_batch(input: CheckAndFinalizeInput) -> None:
@@ -51,149 +63,176 @@ def check_and_finalize_batch(input: CheckAndFinalizeInput) -> None:
     """
     batch_id = input.batch_id
     congress_id = input.congress_id
+    start = time.time()
 
-    # ── Step 0: Read batch metadata in a short-lived session ──
-    with get_session() as db:
-        batch = db.query(EntityMappingBatches).filter_by(id=batch_id).first()
-        if not batch:
-            activity.logger.warning(f"Batch {batch_id} not found, skipping")
-            return
-        # Read while session is open (avoids DetachedInstanceError)
-        entities = batch.entities or []
-        batch_status = batch.status
-        batch_triggered_by_id = batch.triggered_by_id
-        batch_created_at = batch.created_at
+    log_input = _BatchLogInput(
+        abstract_id=str(batch_id),
+        abstract_title="",
+        congress_id=congress_id,
+        batch_id=batch_id,
+    )
+    activity_logger = ActivityLogger(
+        step_name="check_and_finalize_batch",
+        entity="batch",
+        activity="finalize",
+        input_data=log_input,
+        model="n/a",
+    )
 
-    # ── Aborted batches: XLSX generation only (no DB updates, no notification) ──
-    if batch_status == "aborted":
-        _handle_aborted_batch(batch_id, congress_id, entities)
-        return
-
-    if batch_status != "running":
-        activity.logger.info(
-            f"Batch {batch_id} status is '{batch_status}' (not 'running'), skipping"
-        )
-        return
-
-    # ── Running flow: queries + atomic update in their own session ──
-    with get_session() as db:
-        # ── Step 2: Fast check — any sessions still in progress? ──
-        incomplete_count = (
-            db.query(func.count(EntityMappingBatchesSessions.id))
-            .filter_by(batch_id=batch_id)
-            .filter(EntityMappingBatchesSessions.status.in_(("pending", "running")))
-            .scalar()
-        )
-
-        if incomplete_count > 0:
-            activity.logger.info(
-                f"Batch {batch_id}: {incomplete_count} sessions still in progress, skipping"
-            )
-            return
-
-        # ── Step 3: Determine batch status (lightweight GROUP BY) ──
-        status_counts = (
-            db.query(
-                EntityMappingBatchesSessions.status,
-                func.count(EntityMappingBatchesSessions.id),
-            )
-            .filter_by(batch_id=batch_id)
-            .group_by(EntityMappingBatchesSessions.status)
-            .all()
-        )
-
-        if not status_counts:
-            activity.logger.warning(f"No batch_sessions for batch {batch_id}")
-            return
-
-        status_set = {row[0] for row in status_counts}
-        if status_set == {"success"}:
-            final_status = "completed"
-        elif status_set == {"failed"}:
-            final_status = "failed"
-        elif status_set == {"aborted"}:
-            final_status = "aborted"
-        elif "success" in status_set:
-            final_status = "partial"
-        else:
-            final_status = "failed"
-
-        # ── Step 4: Update batch in DB (atomic: only if still 'running') ──
-        now = datetime.now(timezone.utc)
-        rows_updated = db.query(EntityMappingBatches).filter_by(
-            id=batch_id, status="running"
-        ).update({"status": final_status, "completed_at": now})
-
-        if rows_updated == 0:
-            activity.logger.info(
-                f"Batch {batch_id} already finalized by another activity, skipping"
-            )
-            return
-
-        activity.logger.info(
-            f"Batch {batch_id} finalized as '{final_status}'"
-        )
-
-        # ── Step 4b: Gather notification data (while session is open) ──
-        congress_row = db.query(Congresses.name).filter_by(id=congress_id).first()
-        congress_name = congress_row.name if congress_row else f"Congress {congress_id}"
-
-        triggered_by_name = None
-        if batch_triggered_by_id:
-            user_row = db.query(Users.first_name, Users.last_name).filter_by(id=batch_triggered_by_id).first()
-            if user_row:
-                triggered_by_name = f"{user_row.first_name} {user_row.last_name}".strip()
-
-        # ── Step 4c: Per-entity status counts for notification ──
-        entity_status_counts = (
-            db.query(
-                EntityMappingBatchesSessions.entity,
-                EntityMappingBatchesSessions.status,
-                func.count(EntityMappingBatchesSessions.id),
-            )
-            .filter_by(batch_id=batch_id)
-            .group_by(
-                EntityMappingBatchesSessions.entity,
-                EntityMappingBatchesSessions.status,
-            )
-            .all()
-        )
-
-        total_sessions = (
-            db.query(func.count(func.distinct(EntityMappingBatchesSessions.session_id)))
-            .filter_by(batch_id=batch_id)
-            .scalar()
-        )
-
-    # ── Step 5: Skip XLSX if no successful sessions ──
-    if final_status in ("failed", "aborted"):
-        activity.logger.info(
-            f"Batch {batch_id} is '{final_status}', skipping XLSX generation"
-        )
-    else:
-        # ── Step 6: Generate XLSX files ──
-        storage = GCSStorageClient(settings.gcs.GCS_BUCKET_NAME)
-
-        for entity in entities:
-            _generate_batch_xlsx(storage, congress_id, batch_id, entity)
-            _generate_congress_xlsx(storage, congress_id, entity)
-
-        activity.logger.info(
-            f"Batch {batch_id}: XLSX generation complete for entities={entities}"
-        )
-
-    # ── Step 7: Send Teams notification (after XLSX generation) ──
     try:
-        _send_batch_notification(
-            congress_name, batch_id, final_status, entities,
-            entity_status_counts, total_sessions,
-            triggered_by_name, batch_created_at, now,
+        # ── Step 0: Read batch metadata in a short-lived session ──
+        with get_session() as db:
+            batch = db.query(EntityMappingBatches).filter_by(id=batch_id).first()
+            if not batch:
+                activity.logger.warning(f"Batch {batch_id} not found, skipping")
+                return
+            # Read while session is open (avoids DetachedInstanceError)
+            entities = batch.entities or []
+            batch_status = batch.status
+            batch_triggered_by_id = batch.triggered_by_id
+            batch_created_at = batch.created_at
+
+        # ── Aborted batches: XLSX generation only (no DB updates, no notification) ──
+        if batch_status == "aborted":
+            _handle_aborted_batch(batch_id, congress_id, entities)
+            return
+
+        if batch_status != "running":
+            activity.logger.info(
+                f"Batch {batch_id} status is '{batch_status}' (not 'running'), skipping"
+            )
+            return
+
+        # ── Running flow: queries + atomic update in their own session ──
+        with get_session() as db:
+            # ── Step 2: Fast check — any sessions still in progress? ──
+            incomplete_count = (
+                db.query(func.count(EntityMappingBatchesSessions.id))
+                .filter_by(batch_id=batch_id)
+                .filter(EntityMappingBatchesSessions.status.in_(("pending", "running")))
+                .scalar()
+            )
+
+            if incomplete_count > 0:
+                activity.logger.info(
+                    f"Batch {batch_id}: {incomplete_count} sessions still in progress, skipping"
+                )
+                return
+
+            # ── Step 3: Determine batch status (lightweight GROUP BY) ──
+            status_counts = (
+                db.query(
+                    EntityMappingBatchesSessions.status,
+                    func.count(EntityMappingBatchesSessions.id),
+                )
+                .filter_by(batch_id=batch_id)
+                .group_by(EntityMappingBatchesSessions.status)
+                .all()
+            )
+
+            if not status_counts:
+                activity.logger.warning(f"No batch_sessions for batch {batch_id}")
+                return
+
+            status_set = {row[0] for row in status_counts}
+            if status_set == {"success"}:
+                final_status = "completed"
+            elif status_set == {"failed"}:
+                final_status = "failed"
+            elif status_set == {"aborted"}:
+                final_status = "aborted"
+            elif "success" in status_set:
+                final_status = "partial"
+            else:
+                final_status = "failed"
+
+            # ── Step 4: Update batch in DB (atomic: only if still 'running') ──
+            now = datetime.now(timezone.utc)
+            rows_updated = db.query(EntityMappingBatches).filter_by(
+                id=batch_id, status="running"
+            ).update({"status": final_status, "completed_at": now})
+
+            if rows_updated == 0:
+                activity.logger.info(
+                    f"Batch {batch_id} already finalized by another activity, skipping"
+                )
+                return
+
+            activity.logger.info(
+                f"Batch {batch_id} finalized as '{final_status}'"
+            )
+
+            # ── Step 4b: Gather notification data (while session is open) ──
+            congress_row = db.query(Congresses.name).filter_by(id=congress_id).first()
+            congress_name = congress_row.name if congress_row else f"Congress {congress_id}"
+
+            triggered_by_name = None
+            if batch_triggered_by_id:
+                user_row = db.query(Users.first_name, Users.last_name).filter_by(id=batch_triggered_by_id).first()
+                if user_row:
+                    triggered_by_name = f"{user_row.first_name} {user_row.last_name}".strip()
+
+            # ── Step 4c: Per-entity status counts for notification ──
+            entity_status_counts = (
+                db.query(
+                    EntityMappingBatchesSessions.entity,
+                    EntityMappingBatchesSessions.status,
+                    func.count(EntityMappingBatchesSessions.id),
+                )
+                .filter_by(batch_id=batch_id)
+                .group_by(
+                    EntityMappingBatchesSessions.entity,
+                    EntityMappingBatchesSessions.status,
+                )
+                .all()
+            )
+
+            total_sessions = (
+                db.query(func.count(func.distinct(EntityMappingBatchesSessions.session_id)))
+                .filter_by(batch_id=batch_id)
+                .scalar()
+            )
+
+        # ── Step 5: Skip XLSX if no successful sessions ──
+        if final_status in ("failed", "aborted"):
+            activity.logger.info(
+                f"Batch {batch_id} is '{final_status}', skipping XLSX generation"
+            )
+        else:
+            # ── Step 6: Generate XLSX files ──
+            storage = GCSStorageClient(settings.gcs.GCS_BUCKET_NAME)
+
+            for entity in entities:
+                _generate_batch_xlsx(storage, congress_id, batch_id, entity)
+                _generate_congress_xlsx(storage, congress_id, entity)
+
+            activity.logger.info(
+                f"Batch {batch_id}: XLSX generation complete for entities={entities}"
+            )
+
+        # ── Step 7: Send Teams notification (after XLSX generation) ──
+        try:
+            _send_batch_notification(
+                congress_name, batch_id, final_status, entities,
+                entity_status_counts, total_sessions,
+                triggered_by_name, batch_created_at, now,
+            )
+        except Exception:
+            activity.logger.warning(
+                f"Batch {batch_id}: Teams notification failed, continuing",
+                exc_info=True,
+            )
+
+    except Exception as e:
+        duration_ms = int((time.time() - start) * 1000)
+        activity_logger.log_error(
+            error=e,
+            labels={
+                "error_type": type(e).__name__,
+            },
+            duration_ms=duration_ms,
         )
-    except Exception:
-        activity.logger.warning(
-            f"Batch {batch_id}: Teams notification failed, continuing",
-            exc_info=True,
-        )
+        raise
 
 
 def _handle_aborted_batch(
