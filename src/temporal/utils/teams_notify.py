@@ -38,8 +38,42 @@ def send_teams_message(title: str, message: str) -> None:
         logger.info("Teams webhook URL not configured, skipping notification")
         return
 
+    # Build Adaptive Card body from message text
+    body_blocks: list[dict] = [
+        {
+            "type": "TextBlock",
+            "text": title,
+            "weight": "Bolder",
+            "size": "Medium",
+            "wrap": True,
+        }
+    ]
+
+    # Split on <br> and --- to create text blocks
+    for line in message.split("<br>"):
+        line = line.strip()
+        if line == "---":
+            body_blocks.append({"type": "TextBlock", "text": "───", "spacing": "Small"})
+        elif line:
+            body_blocks.append({"type": "TextBlock", "text": line, "wrap": True})
+
+    card_payload = {
+        "type": "message",
+        "attachments": [
+            {
+                "contentType": "application/vnd.microsoft.card.adaptive",
+                "content": {
+                    "type": "AdaptiveCard",
+                    "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                    "version": "1.4",
+                    "body": body_blocks,
+                },
+            }
+        ],
+    }
+
     try:
-        _post_to_teams(url, {"title": title, "text": message})
+        _post_to_teams(url, card_payload)
         logger.info("Teams notification sent successfully")
     except Exception as e:
         sentry_sdk.capture_exception(e)
@@ -47,8 +81,5 @@ def send_teams_message(title: str, message: str) -> None:
 
 
 def format_facts(data: dict) -> str:
-    """Format a dict as Teams message text with bold keys and <br> separators.
-
-    Matches congress-content-utilities pattern: prepare_message_from_dict()
-    """
+    """Format a dict as Teams message text with bold keys and <br> separators."""
     return "<br>".join(f"**{k}**: {v}" for k, v in data.items())
