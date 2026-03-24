@@ -27,7 +27,7 @@ application_config:
 
 keda_config:
   type: temporal
-  max_replicas: 5
+  max_replicas: 7
   pollingInterval: 15
 
   temporal:
