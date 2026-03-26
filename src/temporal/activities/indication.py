@@ -18,17 +18,26 @@ Best Practices Applied:
 - Activities are idempotent - same input produces same output
 - Validation is a separate activity for independent scaling and retry configuration
 - Agent instances are created per-invocation to avoid state leakage between activities
+- Rules CSV is downloaded from GCS using GCS_BUCKET_NAME env + relative path
+  (same pattern as prompt loading), cached in-memory per worker pod
+- Missing rules file or missing bucket config raises non-retryable ApplicationError
 """
 
+import csv
+import io
 import json
 import re
 import time
+from functools import lru_cache
 
 from langchain_core.messages import AIMessage
 from pydantic import ValidationError
 from temporalio import activity
+from temporalio.exceptions import ApplicationError
 
-from src.agents.core.ems_logger import get_logger
+from src.agents.core.config import settings
+from src.agents.core.ems_logger import ActivityLogger
+from src.agents.core.storage import GCSStorageClient
 from src.agents.core.token_tracking import TokenUsageCallbackHandler
 from src.agents.indication.config import config as ind_config
 from src.agents.indication.extraction_agent import IndicationAgent
@@ -41,9 +50,59 @@ from src.agents.indication.validation_agent import IndicationValidationAgent
 from src.temporal.idle_shutdown import track_activity
 
 
+@lru_cache(maxsize=16)
+def _download_rules(rules_relative_path: str) -> tuple[dict, ...]:
+    """Download a rules CSV from GCS and return parsed rows in-memory.
+
+    Uses GCS_BUCKET_NAME from env (same pattern as prompt loading).
+    Results are cached at the worker-process level (lru_cache) so the
+    same file is only downloaded once per worker pod.  Returns a tuple
+    of dicts (hashable for lru_cache).
+
+    Args:
+        rules_relative_path: Path relative to the GCS bucket root
+            (e.g. "rules/indication/v3_rules.csv")
+
+    Raises:
+        ApplicationError(non_retryable=True): If the file does not exist
+            in GCS — a permanent failure that should not be retried by Temporal.
+    """
+    bucket_name = settings.gcs.GCS_BUCKET_NAME
+    try:
+        storage = GCSStorageClient(bucket_name)
+        content = storage.download_text(rules_relative_path)
+    except FileNotFoundError:
+        raise ApplicationError(
+            f"Rules file not found in GCS: {rules_relative_path} "
+            f"(bucket: {bucket_name})",
+            type="RulesFileNotFound",
+            non_retryable=True,
+        )
+
+    reader = csv.DictReader(io.StringIO(content))
+    return tuple(
+        {k.strip(): v.strip() for k, v in row.items()} for row in reader
+    )
+
+
+def _get_rules_data(rules_relative_path: str) -> list[dict] | None:
+    """Resolve rules data from a GCS relative path, or None if path is empty.
+
+    Returns:
+        Parsed list of rule dicts, or None when no rules path is provided.
+
+    Raises:
+        ApplicationError(non_retryable=True): Propagated from _download_rules
+            for missing config or missing file.
+    """
+    if not rules_relative_path:
+        return None
+    return list(_download_rules(rules_relative_path))
+
+
 class IndicationExtractionError(Exception):
     """Raised when indication extraction/validation fails.
-    
+
     This error triggers Temporal retry when raised from activities.
     """
     pass
@@ -179,78 +238,71 @@ def extract_indication(input_data: IndicationInput) -> dict:
     activity.logger.info(
         f"Extracting indication from abstract {input_data.abstract_id}"
     )
-    
-    ems_logger = get_logger("indication_extraction")
-    info = activity.info()
+
     tracker = TokenUsageCallbackHandler()
     start = time.time()
-    
+
+    activity_logger = ActivityLogger(
+        step_name="indication_extraction",
+        entity="indication",
+        activity="extract",
+        input_data=input_data,
+        model=ind_config.LLM_MODEL,
+    )
+
     try:
-        # Create agent and invoke
-        agent = IndicationAgent()
+        rules_data = _get_rules_data(input_data.rules_file_path)
+        agent = IndicationAgent(rules_data=rules_data)
+        activity_logger.prompt_file = agent.prompt_file
+
         raw_result = agent.invoke(
             abstract_title=input_data.abstract_title,
             session_title=input_data.session_title,
             abstract_id=input_data.abstract_id,
             callbacks=[tracker],
         )
-        
+
         # Parse result from messages (can raise IndicationExtractionError)
         messages = raw_result.get("messages", [])
         result = _extract_result_from_messages(messages, ExtractionLLMResponse)
         duration_ms = int((time.time() - start) * 1000)
-        
+
         activity.logger.info(
             f"Extracted indication: '{result.get('generated_indication', '')}' "
             f"from source: {result.get('selected_source', 'unknown')}"
         )
-        
-        ems_logger.info(
-            "step_completed",
-            abstract_id=input_data.abstract_id,
-            model=ind_config.LLM_MODEL,
-            input_data={
-                "abstract_id": input_data.abstract_id,
-                "abstract_title": input_data.abstract_title,
-                "session_title": input_data.session_title,
-            },
+
+        # Log success with ECS format
+        activity_logger.log_success(
             output={
                 "generated_indication": result.get("generated_indication"),
                 "selected_source": result.get("selected_source"),
             },
-            outcome="success",
-            llm_calls=tracker.llm_calls,
-            input_tokens=tracker.usage.input_tokens,
-            output_tokens=tracker.usage.output_tokens,
-            total_tokens=tracker.usage.total_tokens,
+            labels={
+                "rules_file_path": input_data.rules_file_path,
+                "num_rules_retrieved": len(result.get("rules_retrieved", [])),
+            },
+            tracker=tracker,
             duration_ms=duration_ms,
-            attempt=info.attempt,
-            workflow_run_id=info.workflow_run_id,
         )
-        
+
         # Embed token metadata for workflow
         result["_token_usage"] = tracker.usage.to_dict()
         result["_llm_calls"] = tracker.llm_calls
-        
+
         return result
-        
+
     except Exception as e:
         duration_ms = int((time.time() - start) * 1000)
-        ems_logger.error(
-            "step_failed",
-            abstract_id=input_data.abstract_id,
-            model=ind_config.LLM_MODEL,
-            input_data={
-                "abstract_id": input_data.abstract_id,
-                "abstract_title": input_data.abstract_title,
-                "session_title": input_data.session_title,
+
+        activity_logger.log_error(
+            error=e,
+            labels={
+                "rules_file_path": input_data.rules_file_path,
+                "error_type": type(e).__name__,
             },
-            error=str(e),
-            outcome="failure",
-            exc_info=True,
+            tracker=tracker,
             duration_ms=duration_ms,
-            attempt=info.attempt,
-            workflow_run_id=info.workflow_run_id,
         )
         raise
 
@@ -313,15 +365,23 @@ def validate_indication(
     activity.logger.info(
         f"Validating indication extraction for abstract {input_data.abstract_id}"
     )
-    
-    ems_logger = get_logger("indication_validation")
-    info = activity.info()
+
     tracker = TokenUsageCallbackHandler()
     start = time.time()
-    
+
+    activity_logger = ActivityLogger(
+        step_name="indication_validation",
+        entity="indication",
+        activity="validate",
+        input_data=input_data,
+        model=ind_config.VALIDATION_LLM_MODEL,
+    )
+
     try:
-        # Create agent and invoke
-        agent = IndicationValidationAgent()
+        rules_data = _get_rules_data(input_data.rules_file_path)
+        agent = IndicationValidationAgent(rules_data=rules_data)
+        activity_logger.prompt_file = agent.prompt_file
+
         raw_result = agent.invoke(
             session_title=input_data.session_title,
             abstract_title=input_data.abstract_title,
@@ -329,61 +389,47 @@ def validate_indication(
             abstract_id=input_data.abstract_id,
             callbacks=[tracker],
         )
-        
+
         # Parse result from messages (can raise IndicationExtractionError)
         messages = raw_result.get("messages", [])
         result = _extract_result_from_messages(messages, ValidationLLMResponse)
         duration_ms = int((time.time() - start) * 1000)
-        
+
         activity.logger.info(
             f"Validation result for abstract {input_data.abstract_id}: "
             f"{result.get('validation_status', 'UNKNOWN')}"
         )
-        
-        ems_logger.info(
-            "step_completed",
-            abstract_id=input_data.abstract_id,
-            model=ind_config.VALIDATION_LLM_MODEL,
-            input_data={
-                "abstract_id": input_data.abstract_id,
-                "abstract_title": input_data.abstract_title,
-                "generated_indication": extraction_result.get("generated_indication"),
-            },
+
+        # Log success with ECS format
+        activity_logger.log_success(
             output={
                 "validation_status": result.get("validation_status"),
             },
-            outcome="success",
-            llm_calls=tracker.llm_calls,
-            input_tokens=tracker.usage.input_tokens,
-            output_tokens=tracker.usage.output_tokens,
-            total_tokens=tracker.usage.total_tokens,
+            labels={
+                "rules_file_path": input_data.rules_file_path,
+                "num_issues_found": len(result.get("issues_found", [])),
+                "validation_passed": result.get("validation_status") == "PASS",
+            },
+            tracker=tracker,
             duration_ms=duration_ms,
-            attempt=info.attempt,
-            workflow_run_id=info.workflow_run_id,
         )
-        
+
         # Embed token metadata for workflow
         result["_token_usage"] = tracker.usage.to_dict()
         result["_llm_calls"] = tracker.llm_calls
-        
+
         return result
-        
+
     except Exception as e:
         duration_ms = int((time.time() - start) * 1000)
-        ems_logger.error(
-            "step_failed",
-            abstract_id=input_data.abstract_id,
-            model=ind_config.VALIDATION_LLM_MODEL,
-            input_data={
-                "abstract_id": input_data.abstract_id,
-                "abstract_title": input_data.abstract_title,
-                "generated_indication": extraction_result.get("generated_indication"),
+
+        activity_logger.log_error(
+            error=e,
+            labels={
+                "rules_file_path": input_data.rules_file_path,
+                "error_type": type(e).__name__,
             },
-            error=str(e),
-            outcome="failure",
-            exc_info=True,
+            tracker=tracker,
             duration_ms=duration_ms,
-            attempt=info.attempt,
-            workflow_run_id=info.workflow_run_id,
         )
         raise

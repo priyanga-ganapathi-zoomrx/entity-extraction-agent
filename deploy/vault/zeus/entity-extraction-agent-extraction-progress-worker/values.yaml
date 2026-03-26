@@ -1,0 +1,37 @@
+# Vault Path: app-configuration/ferma-congress/zeus/entity-extraction-agent-extraction-progress-worker/values.yaml
+# Key: values
+
+chart_version: 3.1.0
+kind: keda
+product: ferma-congress
+
+application_config:
+  name: entity-extraction-agent-extraction-progress-worker
+  type: backend
+
+  image:
+    name: entity-extraction-agent
+
+  resource:
+    preset: small  # 500m CPU / 1024Mi - DB queries, 30K row aggregates
+
+  entrypoint:
+    enabled: true
+    command: "/app/entity-extraction-agent/.venv/bin/python -m src.temporal.workers.extraction_progress_worker"
+
+  filebeat:
+    enabled: false
+
+  volume_mount: "/app/entity-extraction-agent"
+  nodepool: autopilot
+
+keda_config:
+  type: temporal
+  max_replicas: 3
+  pollingInterval: 30
+
+  temporal:
+    namespace: entity-extraction-agent
+    taskqueue: entity-mapping-progress
+    endpoint: zeus-temporal-server-service.zeus-temporal-app.svc.cluster.local:7233
+    queuesize: "1"

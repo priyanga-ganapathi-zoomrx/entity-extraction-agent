@@ -29,6 +29,7 @@ Usage:
 import json
 import logging
 import sys
+from dataclasses import asdict, dataclass
 from typing import Any
 
 import ecs_logging
@@ -267,6 +268,280 @@ def _configure_structlog() -> None:
         logger_factory=_EmsLoggerFactory(),
         cache_logger_on_first_use=True,
     )
+
+
+# ---------------------------------------------------------------------------
+# ECS Log Schemas
+# ---------------------------------------------------------------------------
+
+@dataclass
+class TransactionLogSchema:
+    """Schema for transaction context in ECS format."""
+    id: str
+    name: str
+    congress_id: int = 0
+    session_id: str = ""
+    session_title: str = ""
+    workflow_id: str = ""
+    batch_id: int = 0
+
+
+@dataclass
+class LLMLogSchema:
+    """Schema for LLM call details in ECS format."""
+    model: str
+    prompt_file: str = "inline"
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+
+
+@dataclass
+class EventDetailsLogSchema:
+    """Schema for event details in ECS format."""
+    entity: str
+    activity: str
+    input: dict
+    output: dict
+    error: str = ""
+    attempt: int = 1
+    labels: dict = None
+    llm_calls: int = 0
+    status: str = "success"
+    duration: int = 0
+
+    def __post_init__(self):
+        if self.labels is None:
+            self.labels = {}
+
+
+def build_ecs_log_event(
+    transaction: TransactionLogSchema,
+    event_details: EventDetailsLogSchema,
+    llm: LLMLogSchema | None = None,
+) -> dict[str, Any]:
+    """Build a nested ECS log event from component schemas.
+
+    Args:
+        transaction: Transaction context (id, congress_id, batch_id, etc.)
+        event_details: Event details (entity, activity, input, output, status, etc.)
+        llm: LLM call details (model, tokens, prompt_file) - optional
+
+    Returns:
+        Nested dict ready for structured logging with transaction, event_details, and llm fields.
+    """
+    log_event = {
+        "transaction": asdict(transaction),
+        "event_details": asdict(event_details),
+    }
+
+    if llm is not None:
+        log_event["llm"] = asdict(llm)
+
+    # Serialize labels dict to JSON string for storage
+    if event_details.labels:
+        log_event["event_details"]["labels"] = json.dumps(event_details.labels)
+    else:
+        log_event["event_details"]["labels"] = "{}"
+
+    return log_event
+
+
+# ---------------------------------------------------------------------------
+# ActivityLogger - Smart logging wrapper
+# ---------------------------------------------------------------------------
+
+class ActivityLogger:
+    """Smart logger wrapper that handles ECS log event building automatically.
+
+    Encapsulates all the complexity of building nested ECS log events so activity
+    code stays clean and focused on business logic.
+
+    Example usage:
+        from src.agents.core.ems_logger import ActivityLogger
+
+        # Initialize once at start of activity
+        activity_logger = ActivityLogger(
+            step_name="drug_extraction",
+            entity="drug",
+            activity="extract",
+            input_data=input_data,  # Must have: abstract_id, abstract_title, congress_id, batch_id
+            model="gpt-4",
+            prompt_file="inline",
+        )
+
+        # Log success with one line
+        activity_logger.log_success(
+            output={"drugs": drugs_list},
+            labels={"num_drugs_extracted": len(drugs_list)},
+            tracker=token_tracker,
+            duration_ms=duration_ms,
+        )
+
+        # Or log error with one line
+        activity_logger.log_error(
+            error=exc,
+            labels={"error_type": "validation_failed"},
+            tracker=token_tracker,
+            duration_ms=duration_ms,
+        )
+    """
+
+    def __init__(
+        self,
+        step_name: str,
+        entity: str,
+        activity: str,
+        input_data,
+        model: str,
+        prompt_file: str = "inline",
+    ):
+        """Initialize the activity logger.
+
+        Args:
+            step_name: Logical step identifier (e.g. "drug_extraction")
+            entity: Entity type being processed (e.g. "drug", "indication", "drug_class")
+            activity: Activity type (e.g. "extract", "validate", "regimen")
+            input_data: Input schema instance (must have abstract_id, abstract_title, congress_id, batch_id)
+            model: LLM model name (e.g. "gpt-4")
+            prompt_file: Prompt file path (e.g. "gcs://bucket/prompt.txt") or "inline"
+        """
+        self.step_name = step_name
+        self.entity = entity
+        self.activity = activity
+        self.input_data = input_data
+        self.model = model
+        self.prompt_file = prompt_file
+        self.logger = get_logger(step_name)
+
+    def _build_transaction(self) -> TransactionLogSchema:
+        """Build transaction schema from input_data."""
+        return TransactionLogSchema(
+            id=str(self.input_data.abstract_id),
+            name=self.input_data.abstract_title,
+            congress_id=getattr(self.input_data, "congress_id", 0),
+            session_id="",
+            session_title=getattr(self.input_data, "session_title", ""),
+            workflow_id="",
+            batch_id=getattr(self.input_data, "batch_id", 0),
+        )
+
+    def log_success(
+        self,
+        output: dict,
+        labels: dict,
+        tracker=None,
+        duration_ms: int = 0,
+    ) -> None:
+        """Log a successful activity completion.
+
+        Args:
+            output: Activity output as dict (e.g. {"drugs": ["aspirin"]})
+            labels: Additional metadata labels as dict
+            tracker: TokenUsageCallbackHandler instance (optional for non-LLM activities)
+            duration_ms: Activity duration in milliseconds
+        """
+        transaction = self._build_transaction()
+
+        event_details = EventDetailsLogSchema(
+            entity=self.entity,
+            activity=self.activity,
+            input=asdict(self.input_data),
+            output=output,
+            error="",
+            attempt=1,
+            labels=labels,
+            llm_calls=tracker.llm_calls if tracker else 0,
+            status="success",
+            duration=duration_ms,
+        )
+
+        if tracker:
+            llm = LLMLogSchema(
+                model=self.model,
+                prompt_file=self.prompt_file,
+                input_tokens=tracker.usage.input_tokens,
+                output_tokens=tracker.usage.output_tokens,
+                total_tokens=tracker.usage.total_tokens,
+            )
+        else:
+            llm = None
+
+        log_event = build_ecs_log_event(transaction, event_details, llm)
+        self.logger.info("step_completed", **log_event)
+
+    def log_error(
+        self,
+        error: Exception,
+        labels: dict,
+        tracker=None,
+        duration_ms: int = 0,
+    ) -> None:
+        """Log a failed activity execution.
+
+        Args:
+            error: Exception that caused the failure
+            labels: Additional metadata labels as dict
+            tracker: TokenUsageCallbackHandler instance (optional for non-LLM activities)
+            duration_ms: Activity duration in milliseconds
+        """
+        transaction = self._build_transaction()
+
+        event_details = EventDetailsLogSchema(
+            entity=self.entity,
+            activity=self.activity,
+            input=asdict(self.input_data),
+            output={},
+            error=str(error),
+            attempt=1,
+            labels=labels,
+            llm_calls=tracker.llm_calls if tracker else 0,
+            status="failed",
+            duration=duration_ms,
+        )
+
+        if tracker:
+            llm = LLMLogSchema(
+                model=self.model,
+                prompt_file=self.prompt_file,
+                input_tokens=tracker.usage.input_tokens,
+                output_tokens=tracker.usage.output_tokens,
+                total_tokens=tracker.usage.total_tokens,
+            )
+        else:
+            llm = None
+
+        log_event = build_ecs_log_event(transaction, event_details, llm)
+        self.logger.error("step_failed", **log_event, exc_info=True)
+
+    def log_skipped(
+        self,
+        reason: str,
+        duration_ms: int,
+    ) -> None:
+        """Log a skipped activity (no LLM call made).
+
+        Args:
+            reason: Reason for skipping (e.g. "no_primary_drug")
+            duration_ms: Activity duration in milliseconds
+        """
+        transaction = self._build_transaction()
+
+        event_details = EventDetailsLogSchema(
+            entity=self.entity,
+            activity=self.activity,
+            input=asdict(self.input_data),
+            output={},
+            error="",
+            attempt=1,
+            labels={"skip_reason": reason},
+            llm_calls=0,
+            status="skipped",
+            duration=duration_ms,
+        )
+
+        log_event = build_ecs_log_event(transaction, event_details, llm=None)
+        self.logger.info("step_skipped", **log_event)
 
 
 # ---------------------------------------------------------------------------

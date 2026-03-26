@@ -1,18 +1,7 @@
 """Schemas for Temporal workflows.
 
-This module exports:
-- Status tracking schemas (from status.py)
-- Workflow input/output schemas (from workflow.py)
+This module exports workflow input/output schemas.
 """
-
-from src.temporal.schemas.status import (
-    StepStatus,
-    PipelineMetrics,
-    DrugPipelineStatus,
-    DrugClassPipelineStatus,
-    IndicationPipelineStatus,
-    WorkflowStatus,
-)
 
 from src.temporal.schemas.workflow import (
     AbstractExtractionInput,
@@ -24,12 +13,6 @@ from src.temporal.schemas.workflow import (
 )
 
 __all__ = [
-    "StepStatus",
-    "PipelineMetrics",
-    "DrugPipelineStatus",
-    "DrugClassPipelineStatus",
-    "IndicationPipelineStatus",
-    "WorkflowStatus",
     "AbstractExtractionInput",
     "AbstractExtractionOutput",
     "StepResult",

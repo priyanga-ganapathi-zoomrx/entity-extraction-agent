@@ -13,11 +13,11 @@ application_config:
     name: entity-extraction-agent
 
   resource:
-    preset: small  # 500m CPU / 1024Mi
+    preset: micro  # 250m CPU / 512Mi
 
   entrypoint:
     enabled: true
-    command: "python -m src.temporal.workers.workflow_worker"
+    command: "/app/entity-extraction-agent/.venv/bin/python -m src.temporal.workers.workflow_worker"
 
   filebeat:
     enabled: false
@@ -27,7 +27,7 @@ application_config:
 
 keda_config:
   type: temporal
-  max_replicas: 4
+  max_replicas: 3
   pollingInterval: 15
 
   temporal:

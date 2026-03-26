@@ -7,7 +7,8 @@ They handle:
 - Serializing outputs to dicts for Temporal
 
 Activity Groups:
-- CHECKPOINT: Storage operations for status and step outputs (fast I/O)
+- RESULT_STORAGE: Save step outputs to GCS for download from admin portal
+- EXTRACTION_PROGRESS: Update entity_mapping SQL tables with workflow progress
 - DRUG: Drug extraction and validation (fast LLM)
 - DRUG_CLASS: 5-step drug class pipeline (search + LLM)
 - INDICATION: Indication extraction and validation (mixed LLM speeds)
@@ -18,21 +19,25 @@ for non-Temporal use cases.
 """
 
 # =============================================================================
-# CHECKPOINT ACTIVITIES (storage operations)
+# RESULT STORAGE ACTIVITIES (GCS uploads for downloadable results)
 # =============================================================================
 
-from src.temporal.activities.checkpoint import (
-    load_workflow_status,
-    save_workflow_status,
-    load_step_output,
-    save_step_output,
-)
+from src.temporal.activities.result_storage import save_step_output
 
-CHECKPOINT_ACTIVITIES = [
-    load_workflow_status,
-    save_workflow_status,
-    load_step_output,
+RESULT_STORAGE_ACTIVITIES = [
     save_step_output,
+]
+
+# =============================================================================
+# EXTRACTION PROGRESS ACTIVITIES (SQL status updates + batch finalization)
+# =============================================================================
+
+from src.temporal.activities.extraction_progress import update_extraction_progress
+from src.temporal.activities.check_and_finalize_batch import check_and_finalize_batch
+
+EXTRACTION_PROGRESS_ACTIVITIES = [
+    update_extraction_progress,
+    check_and_finalize_batch,
 ]
 
 # =============================================================================
@@ -94,19 +99,21 @@ INDICATION_ACTIVITIES = [
 # =============================================================================
 
 ALL_ACTIVITIES = (
-    CHECKPOINT_ACTIVITIES +
+    RESULT_STORAGE_ACTIVITIES +
+    EXTRACTION_PROGRESS_ACTIVITIES +
     DRUG_ACTIVITIES +
     DRUG_CLASS_ACTIVITIES +
     INDICATION_ACTIVITIES
 )
 
 __all__ = [
-    # Checkpoint activities
-    "load_workflow_status",
-    "save_workflow_status",
-    "load_step_output",
+    # Result storage activities
     "save_step_output",
-    "CHECKPOINT_ACTIVITIES",
+    "RESULT_STORAGE_ACTIVITIES",
+    # Extraction progress activities
+    "update_extraction_progress",
+    "check_and_finalize_batch",
+    "EXTRACTION_PROGRESS_ACTIVITIES",
     # Drug activities
     "extract_drugs",
     "validate_drugs",

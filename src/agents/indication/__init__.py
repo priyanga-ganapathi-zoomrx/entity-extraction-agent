@@ -22,7 +22,7 @@ from src.agents.indication.schemas import (
 from src.agents.indication.config import config
 
 # Tools
-from src.agents.indication.tools import get_tools, get_indication_rules
+from src.agents.indication.tools import get_tools
 
 # Prompts
 from src.agents.indication.prompts import (
@@ -55,7 +55,6 @@ __all__ = [
     "config",
     # Tools & Prompts
     "get_tools",
-    "get_indication_rules",
     "get_extraction_prompt",
     "get_validation_prompt",
     "EXTRACTION_PROMPT_NAME",

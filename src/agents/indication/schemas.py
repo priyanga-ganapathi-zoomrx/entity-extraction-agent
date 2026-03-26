@@ -10,17 +10,23 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
+from src.agents.core.schemas import BaseActivityInput
+
 
 # =============================================================================
 # Dataclass for Activity Input
 # =============================================================================
 
 @dataclass
-class IndicationInput:
-    """Input for indication extraction activity."""
-    abstract_id: str
-    abstract_title: str
+class IndicationInput(BaseActivityInput):
+    """Input for indication extraction activity.
+
+    Inherits transaction context from BaseActivityInput:
+    - abstract_id, abstract_title, congress_id, batch_id
+    """
     session_title: str = ""
+    # Relative path to rules CSV within GCS_BUCKET_NAME (e.g. "rules/indication/v3.csv")
+    rules_file_path: str = ""
 
 
 # =============================================================================
