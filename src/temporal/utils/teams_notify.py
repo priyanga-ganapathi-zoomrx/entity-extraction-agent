@@ -26,12 +26,17 @@ def _post_to_teams(url: str, json_data: dict) -> None:
     resp.raise_for_status()
 
 
-def send_teams_message(title: str, message: str) -> None:
+def send_teams_message(
+    title: str,
+    message: str,
+    mention: dict | None = None,
+) -> None:
     """Send a message to Teams. Never raises — logs/Sentry on failure.
 
     Args:
         title: Bold header text
         message: Body text (supports **bold** and <br> for line breaks)
+        mention: Optional dict with 'name' and 'email' to @mention a user
     """
     url = _get_teams_webhook_url()
     if not url:
@@ -57,18 +62,34 @@ def send_teams_message(title: str, message: str) -> None:
         elif line:
             body_blocks.append({"type": "TextBlock", "text": line, "wrap": True})
 
+    card_content = {
+        "type": "AdaptiveCard",
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "version": "1.4",
+        "body": body_blocks,
+    }
+
+    if mention:
+        card_content["msteams"] = {
+            "entities": [
+                {
+                    "type": "mention",
+                    "text": f"<at>{mention['name']}</at>",
+                    "mentioned": {
+                        "id": mention["email"],
+                        "name": mention["name"],
+                    },
+                }
+            ]
+        }
+
     card_payload = {
         "type": "message",
         "attachments": [
             {
                 "contentType": "application/vnd.microsoft.card.adaptive",
                 "contentUrl": None,
-                "content": {
-                    "type": "AdaptiveCard",
-                    "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-                    "version": "1.4",
-                    "body": body_blocks,
-                },
+                "content": card_content,
             }
         ],
     }
