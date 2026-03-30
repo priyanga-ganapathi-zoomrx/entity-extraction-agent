@@ -294,6 +294,8 @@ class LLMLogSchema:
     input_tokens: int = 0
     output_tokens: int = 0
     total_tokens: int = 0
+    cache_creation_input_tokens: int = 0
+    cache_read_input_tokens: int = 0
 
 
 @dataclass
@@ -463,6 +465,8 @@ class ActivityLogger:
                 input_tokens=tracker.usage.input_tokens,
                 output_tokens=tracker.usage.output_tokens,
                 total_tokens=tracker.usage.total_tokens,
+                cache_creation_input_tokens=tracker.usage.cache_creation_input_tokens,
+                cache_read_input_tokens=tracker.usage.cache_read_input_tokens,
             )
         else:
             llm = None
@@ -507,6 +511,8 @@ class ActivityLogger:
                 input_tokens=tracker.usage.input_tokens,
                 output_tokens=tracker.usage.output_tokens,
                 total_tokens=tracker.usage.total_tokens,
+                cache_creation_input_tokens=tracker.usage.cache_creation_input_tokens,
+                cache_read_input_tokens=tracker.usage.cache_read_input_tokens,
             )
         else:
             llm = None
