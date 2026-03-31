@@ -120,3 +120,4 @@ class Users(Base):
     id = Column(String(200), primary_key=True, index=True)
     first_name = Column(String(200))
     last_name = Column(String(200))
+    email_id = Column(String(100))

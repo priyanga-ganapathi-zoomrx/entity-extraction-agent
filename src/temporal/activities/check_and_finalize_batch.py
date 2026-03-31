@@ -167,10 +167,12 @@ def check_and_finalize_batch(input: CheckAndFinalizeInput) -> None:
             congress_name = congress_row.name if congress_row else f"Congress {congress_id}"
 
             triggered_by_name = None
+            triggered_by_email = None
             if batch_triggered_by_id:
-                user_row = db.query(Users.first_name, Users.last_name).filter_by(id=batch_triggered_by_id).first()
+                user_row = db.query(Users.first_name, Users.last_name, Users.email_id).filter_by(id=batch_triggered_by_id).first()
                 if user_row:
                     triggered_by_name = f"{user_row.first_name} {user_row.last_name}".strip()
+                    triggered_by_email = user_row.email_id
 
             # ── Step 4c: Per-entity status counts for notification ──
             entity_status_counts = (
@@ -215,7 +217,8 @@ def check_and_finalize_batch(input: CheckAndFinalizeInput) -> None:
             _send_batch_notification(
                 congress_name, batch_id, final_status, entities,
                 entity_status_counts, total_sessions,
-                triggered_by_name, batch_created_at, now,
+                triggered_by_name, triggered_by_email,
+                batch_created_at, now,
             )
         except Exception:
             activity.logger.warning(
@@ -397,6 +400,7 @@ def _send_batch_notification(
     entity_status_counts: list,
     total_sessions: int,
     triggered_by: str | None,
+    triggered_by_email: str | None,
     created_at: datetime | None,
     completed_at: datetime,
 ) -> None:
@@ -423,7 +427,11 @@ def _send_batch_notification(
         "Total Sessions": str(total),
     }
 
-    if triggered_by:
+    mention = None
+    if triggered_by and triggered_by_email:
+        details["Triggered By"] = f"<at>{triggered_by}</at>"
+        mention = {"name": triggered_by, "email": triggered_by_email}
+    elif triggered_by:
         details["Triggered By"] = triggered_by
 
     if created_at:
@@ -450,4 +458,4 @@ def _send_batch_notification(
 
     # Combine with a separator between details and results
     body = format_facts(details) + "<br>---<br>" + format_facts(results)
-    send_teams_message(title, body)
+    send_teams_message(title, body, mention=mention)
