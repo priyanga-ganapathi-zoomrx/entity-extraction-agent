@@ -149,11 +149,19 @@ class AbstractExtractionWorkflow:
 
         try:
             await self._execute_pipeline(input)
-            # Check if batch is done and finalize (update status, generate XLSX)
+            # Determine which entities this workflow handles
+            if input.entity == "drug":
+                all_entities = ["drug", "drug_class"]
+            else:
+                all_entities = [input.entity]
+            # Final call: emits XLSX for the last entity (+ fallback for any
+            # intermediate failures), checks batch finalization, sends Teams.
             await workflow.execute_activity(
                 "check_and_finalize_batch",
                 CheckAndFinalizeInput(
-                    batch_id=input.batch_id, congress_id=input.congress_id
+                    batch_id=input.batch_id,
+                    congress_id=input.congress_id,
+                    completed_entities=all_entities,
                 ),
                 task_queue=TaskQueues.ENTITY_MAPPING_PROGRESS,
                 start_to_close_timeout=Timeouts.BATCH_FINALIZATION,
@@ -180,6 +188,31 @@ class AbstractExtractionWorkflow:
                         await self._run_drug_pipeline(input)
                         await self._update_progress(input, "drug", "success")
                         self._completed_steps.add("drug_pipeline")
+
+                        # Emit drug XLSX as soon as the entity is done across
+                        # the batch. Wrapped in try/except so XLSX failure does
+                        # not mark extraction as failed; the run() fallback
+                        # covers it.
+                        try:
+                            await workflow.execute_activity(
+                                "check_and_finalize_batch",
+                                CheckAndFinalizeInput(
+                                    batch_id=input.batch_id,
+                                    congress_id=input.congress_id,
+                                    completed_entities=["drug"],
+                                ),
+                                task_queue=TaskQueues.ENTITY_MAPPING_PROGRESS,
+                                start_to_close_timeout=Timeouts.BATCH_FINALIZATION,
+                                retry_policy=RetryPolicies.BATCH_FINALIZATION,
+                            )
+                        except Exception as e:
+                            if is_cancelled_exception(e):
+                                raise
+                            workflow.logger.warning(
+                                f"Intermediate drug XLSX generation failed for "
+                                f"{input.abstract_id}, will retry in run() fallback",
+                                exc_info=True,
+                            )
                     else:
                         workflow.logger.info(
                             f"Skipping already completed drug pipeline for {input.abstract_id}"
@@ -259,8 +292,9 @@ class AbstractExtractionWorkflow:
                     start_to_close_timeout=Timeouts.ENTITY_MAPPING_PROGRESS,
                     retry_policy=RetryPolicies.ENTITY_MAPPING_PROGRESS,
                 )
-                # If drug pipeline failed, also mark drug_class as failed
-                # so batch finalization isn't blocked by a "pending" drug_class
+
+                # Build list of all entities that are now terminal
+                all_terminal_entities = [entity]
                 if (
                     input.entity == "drug"
                     and self._current_entity == "drug"
@@ -273,11 +307,20 @@ class AbstractExtractionWorkflow:
                         start_to_close_timeout=Timeouts.ENTITY_MAPPING_PROGRESS,
                         retry_policy=RetryPolicies.ENTITY_MAPPING_PROGRESS,
                     )
-                # Check if batch is done and finalize
+                    all_terminal_entities.append("drug_class")
+                if (
+                    input.entity == "drug"
+                    and "drug_pipeline" in self._completed_steps
+                    and "drug" not in all_terminal_entities
+                ):
+                    all_terminal_entities.append("drug")
+
                 await workflow.execute_activity(
                     "check_and_finalize_batch",
                     CheckAndFinalizeInput(
-                        batch_id=input.batch_id, congress_id=input.congress_id
+                        batch_id=input.batch_id,
+                        congress_id=input.congress_id,
+                        completed_entities=all_terminal_entities,
                     ),
                     task_queue=TaskQueues.ENTITY_MAPPING_PROGRESS,
                     start_to_close_timeout=Timeouts.BATCH_FINALIZATION,
@@ -311,7 +354,8 @@ class AbstractExtractionWorkflow:
                         start_to_close_timeout=Timeouts.ENTITY_MAPPING_PROGRESS,
                         retry_policy=RetryPolicies.ENTITY_MAPPING_PROGRESS,
                     )
-                    # If drug pipeline was aborted, also mark drug_class as aborted
+
+                    all_terminal_entities = [entity]
                     if (
                         input.entity == "drug"
                         and self._current_entity == "drug"
@@ -330,12 +374,20 @@ class AbstractExtractionWorkflow:
                             start_to_close_timeout=Timeouts.ENTITY_MAPPING_PROGRESS,
                             retry_policy=RetryPolicies.ENTITY_MAPPING_PROGRESS,
                         )
-                    # Defensive: check batch finalization (likely no-op since
-                    # AP server already set batch status to 'aborted')
+                        all_terminal_entities.append("drug_class")
+                    if (
+                        input.entity == "drug"
+                        and "drug_pipeline" in self._completed_steps
+                        and "drug" not in all_terminal_entities
+                    ):
+                        all_terminal_entities.append("drug")
+
                     workflow.start_activity(
                         "check_and_finalize_batch",
                         CheckAndFinalizeInput(
-                            batch_id=input.batch_id, congress_id=input.congress_id
+                            batch_id=input.batch_id,
+                            congress_id=input.congress_id,
+                            completed_entities=all_terminal_entities,
                         ),
                         task_queue=TaskQueues.ENTITY_MAPPING_PROGRESS,
                         start_to_close_timeout=Timeouts.BATCH_FINALIZATION,
@@ -369,7 +421,17 @@ class AbstractExtractionWorkflow:
         Used when workflow is cancelled; asyncio.shield ensures this activity
         runs even though the workflow is tearing down.  If it fails (DB down,
         timeout), we log and continue — workflow still terminates as CANCELLED.
+
+        Uses blocking execute_activity (not fire-and-forget start_activity)
+        because the per-entity count query in check_and_finalize_batch must
+        see the terminal status written by update_extraction_progress. The
+        signaled-abort path in _execute_pipeline uses fire-and-forget because
+        it returns immediately and the batch finalization call is also
+        fire-and-forget — ordering doesn't matter there.
         """
+        entity = self._current_entity or input.entity
+        all_terminal_entities = [entity]
+
         try:
             await asyncio.shield(
                 workflow.execute_activity(
@@ -378,7 +440,7 @@ class AbstractExtractionWorkflow:
                         input.batch_id,
                         input.congress_id,
                         input.abstract_id,
-                        self._current_entity or input.entity,
+                        entity,
                         "aborted",
                     ],
                     task_queue=TaskQueues.ENTITY_MAPPING_PROGRESS,
@@ -392,10 +454,9 @@ class AbstractExtractionWorkflow:
                 "workflow will still terminate as CANCELLED"
             )
 
-        # If drug pipeline was cancelled, also mark drug_class as aborted
         if (
             input.entity == "drug"
-            and (self._current_entity or input.entity) == "drug"
+            and entity == "drug"
             and "drug_class_pipeline" not in self._completed_steps
         ):
             try:
@@ -418,14 +479,22 @@ class AbstractExtractionWorkflow:
                 workflow.logger.warning(
                     f"Failed to update drug_class abort status for {input.abstract_id}"
                 )
+            all_terminal_entities.append("drug_class")
+        if (
+            input.entity == "drug"
+            and "drug_pipeline" in self._completed_steps
+            and "drug" not in all_terminal_entities
+        ):
+            all_terminal_entities.append("drug")
 
-        # Check if batch is done and generate XLSX for any successful sessions
         try:
             await asyncio.shield(
                 workflow.execute_activity(
                     "check_and_finalize_batch",
                     CheckAndFinalizeInput(
-                        batch_id=input.batch_id, congress_id=input.congress_id
+                        batch_id=input.batch_id,
+                        congress_id=input.congress_id,
+                        completed_entities=all_terminal_entities,
                     ),
                     task_queue=TaskQueues.ENTITY_MAPPING_PROGRESS,
                     start_to_close_timeout=Timeouts.BATCH_FINALIZATION,
