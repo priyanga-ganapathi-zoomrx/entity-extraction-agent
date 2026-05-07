@@ -149,18 +149,13 @@ class AbstractExtractionWorkflow:
 
         try:
             await self._execute_pipeline(input)
-            # Drug XLSX is owned by the intermediate call after the drug
-            # pipeline succeeds; the final call only carries the last entity
-            # so we don't regenerate drug XLSX from every drug_class
-            # completion. If the intermediate call fails, the
-            # "Intermediate drug XLSX generation failed" warning log is the
-            # signal — recover by regenerating manually.
+            # Determine which entities this workflow handles
             if input.entity == "drug":
-                all_entities = ["drug_class"]
+                all_entities = ["drug", "drug_class"]
             else:
                 all_entities = [input.entity]
-            # Final call: emits XLSX for the last entity, checks batch
-            # finalization, sends Teams.
+            # Final call: emits XLSX for the last entity (+ fallback for any
+            # intermediate failures), checks batch finalization, sends Teams.
             await workflow.execute_activity(
                 "check_and_finalize_batch",
                 CheckAndFinalizeInput(
