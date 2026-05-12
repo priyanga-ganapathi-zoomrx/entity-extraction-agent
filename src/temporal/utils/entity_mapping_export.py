@@ -8,6 +8,7 @@ Reuses transform functions from src/scripts/temporal/ exporters.
 
 import io
 import logging
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Union
 
@@ -113,13 +114,23 @@ ENTITY_TRANSFORMS = {
 # ── XLSX helpers ────────────────────────────────────────────────────
 
 
+# Matches openpyxl's ILLEGAL_CHARACTERS_RE — control chars that break ws.append.
+_CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
+def _sanitize_cell(value) -> str:
+    if value is None:
+        return ""
+    return _CONTROL_CHAR_RE.sub("", str(value))
+
+
 def _rows_to_xlsx(columns: list[str], rows: list[dict]) -> bytes:
     """Convert list of row dicts to XLSX bytes."""
     wb = Workbook(write_only=True)
     ws = wb.create_sheet()
     ws.append(columns)
     for row in rows:
-        ws.append([row.get(col, "") for col in columns])
+        ws.append([_sanitize_cell(row.get(col, "")) for col in columns])
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
